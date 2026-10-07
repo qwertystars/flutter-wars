@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
@@ -26,7 +27,7 @@ admin = APIRouter(
 
 @router.get("/market/listings/{listing_id}/price", response_model=PriceQuoteOut)
 def listing_price(
-    listing_id: int,
+    listing_id: UUID,
     session: Session = Depends(get_session),
     now: datetime = Depends(get_now),
     _: Principal = Depends(get_principal),
@@ -63,13 +64,13 @@ def _config_out(state: ListingPricing) -> PricingConfigOut:
 
 
 @admin.get("/listings/{listing_id}/pricing", response_model=PricingConfigOut)
-def get_pricing(listing_id: int, session: Session = Depends(get_session)) -> PricingConfigOut:
+def get_pricing(listing_id: UUID, session: Session = Depends(get_session)) -> PricingConfigOut:
     return _config_out(service.get_config(session, listing_id))
 
 
 @admin.patch("/listings/{listing_id}/pricing", response_model=PricingConfigOut)
 def update_pricing(
-    listing_id: int,
+    listing_id: UUID,
     body: PricingUpdate,
     session: Session = Depends(get_session),
     now: datetime = Depends(get_now),
@@ -83,6 +84,6 @@ def update_pricing(
 
 
 @admin.get("/listings/{listing_id}/price-history", response_model=list[PriceHistoryOut])
-def history(listing_id: int, session: Session = Depends(get_session)) -> list[PriceHistory]:
+def history(listing_id: UUID, session: Session = Depends(get_session)) -> list[PriceHistory]:
     market.get_listing(session, listing_id)
     return service.price_history(session, listing_id)

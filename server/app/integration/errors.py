@@ -1,7 +1,21 @@
-class BusinessError(Exception):
+from app.core.errors import AppError
+
+
+class BusinessError(AppError):
+    """I/J errors: fixed, class-owned public text on the shared AppError shape.
+
+    `detail` is an optional internal note for logs/debugging; it is never put
+    in the HTTP response, so adapter/SQL text cannot leak through it.
+    """
+
     code = "BUSINESS_ERROR"
     message = "The operation could not be completed."
     status_code = 409
+
+    def __init__(self, detail: str | None = None) -> None:
+        cls = type(self)
+        super().__init__(cls.code, cls.message, status_code=cls.status_code)
+        self.detail = detail
 
 
 class InsufficientCredits(BusinessError):

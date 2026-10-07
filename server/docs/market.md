@@ -10,6 +10,9 @@ Code: `app/modules/market/`. Owns *when* and *what* can be traded: the market, i
 | `market_round` | A trading or auction round: `kind`, `status`, timestamps, `version` (bumped on each transition). At most one `open`/`paused` round per market (partial unique index). |
 | `market_listing` | A widget in a round: `base_price`, `supply_total`, `stock_remaining`, `max_per_purchase`. Unique per (round, widget). |
 | `market_round_event` | Append-only log of every transition: action, from/to status, actor, reason, time. |
+| `market_auction_lot` | Units of an auction-round listing held for one Auction Engine (J) auction, keyed by J's auction id. Taken out of `stock_remaining` when created; `consumed` once J awards them. |
+
+IDs of the market, rounds, listings and widgets are **UUIDs** (they cross module boundaries; I/J use UUIDs throughout). The append-only logs keep integer keys, since they are ordered by them.
 
 Credits are integers (`BIGINT` prices); no floats anywhere.
 
@@ -76,10 +79,12 @@ GET /market/listings
 | POST | `/admin/market/rounds/{id}/listings` | `ListingCreate` (draft only). |
 | PATCH | `/admin/market/listings/{id}` | Any subset of `ListingCreate` fields (draft only). |
 | DELETE | `/admin/market/listings/{id}` | Draft only. |
+| POST | `/admin/market/listings/{id}/auction-lots` | `{"auction_id", "quantity"}`. Holds units for a J auction (create the auction in J first, then the lot, then open the auction). Auction round, open or paused, finite listing. `409 AUCTION_LOT_EXISTS`, `OUT_OF_STOCK`, `INFINITE_SUPPLY`, `ROUND_NOT_LIVE`, `WRONG_ROUND_KIND`. |
+| DELETE | `/admin/market/auction-lots/{auction_id}` | Release an unconsumed lot back to stock. `409 AUCTION_LOT_MISSING`. |
 
 `ListingCreate`:
 ```json
-{"widget_id": 3, "base_price": 100, "supply": 10, "max_per_purchase": 2,
+{"widget_id": "6f1c…-uuid", "base_price": 100, "supply": 10, "max_per_purchase": 2,
  "pricing": {"strategy": "dynamic", "params": {"interval_seconds": 120}}}
 ```
 `supply` is a non-negative integer or `"infinite"`. `pricing` defaults to `{"strategy": "static"}`.
@@ -107,6 +112,9 @@ These live in `app/modules/market/service.py` and run inside the caller's transa
 | `return_stock(session, listing_id, quantity)` | For resale once its rules exist. Infinite stays infinite. |
 | `lock_round(session, round_id, *, exclusive=False)` | Fresh read of a round under `FOR SHARE`/`FOR UPDATE`, for anything that must stay true until commit. |
 | `current_round(session)`, `get_round`, `get_listing` | Plain reads (may be cached in the session; do not base mutations on them). |
+| `create_auction_lot`, `guard_auction_lot`, `consume_auction_lot`, `release_auction_lot` | The auction side. `guard_auction_lot` locks the round `FOR SHARE` and the lot `FOR UPDATE`, **never the listing row**: trades lock ledger accounts before the listing, so locking it here could deadlock with a trade. Bidding needs an `open` round and an unconsumed lot; settling works after close. |
+
+**I/J use these through `app/modules/market/adapter.py` (`MarketAdapter`, the `MarketPort` implementation).** It maps G's codes to the port errors I/J document (`LISTING_NOT_FOUND`/`WRONG_ROUND_KIND` → `INVALID_LISTING`, `ROUND_NOT_OPEN` → `MARKET_NOT_OPEN`, `OUT_OF_STOCK` → `INSUFFICIENT_STOCK`, `AUCTION_LOT_MISSING` → `CONFIGURATION_REQUIRED`). Resale goes back into the same listing and only finite listings accept it. `release_unsold_lot` is a ready `NoBidHandler` if organizers decide unsold lots return to stock. `tests/test_gh_ij_integration.py` runs I/J end to end on these adapters.
 
 **Purchase recipe for Module I** (lock order: round → pricing row → listing stock → ledger → inventory; every stock change must happen under the pricing-row lock, which is why `get_current_price` comes before `take_stock`):
 
@@ -131,7 +139,7 @@ session.commit()          # all or nothing
 - **Calls:**
   - Catalog (D) `get_widget(session, id)`: existence and `archived` check when listing a widget and when opening a round.
   - Pricing (H) `configure_listing`, `remove_listing`, `get_config`, `on_round_opened`, `quote_many`.
-- **Called by:** Transaction (I) and Auction (J) through the contract above. Admin (K) may proxy the organizer routes.
+- **Called by:** Transaction (I) and Auction (J) through `MarketAdapter` (above). Admin (K) may proxy the organizer routes.
 - **Exposes:** the participant and organizer routes above. `market_listing.id` is the listing ID used everywhere else.
 
 ## Decisions taken here that need lead/team approval (spec TBDs)
@@ -143,4 +151,5 @@ session.commit()          # all or nothing
 5. **One active market**, and **one live round per market**. Do auction and trading rounds ever need to run in parallel? If so, the live-round index becomes per (market, kind).
 6. **Listings are frozen once a round opens.** There is no mid-round restock. Changing that also needs a pricing change, because supply reconstruction assumes stock moves only through trades.
 7. **Integer credits.**
-8. **Widget IDs are integers**, assumed until Catalog (D) freezes its ID contract.
+8. **UUID IDs** for market, round, listing and widget, matching I/J. Catalog (D) must keep widget IDs UUIDs.
+9. **Auction lots** are held once the round is open (listings frozen), come out of stock immediately, and need a finite listing. What happens to an unsold lot (`release_unsold_lot` or not) is an organizer decision.

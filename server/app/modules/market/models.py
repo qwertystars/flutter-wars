@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from enum import StrEnum
+from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
@@ -38,7 +39,7 @@ class Market(SQLModel, table=True):
         ),
     )
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
     name: str = Field(max_length=120)
     is_active: bool = True
     created_at: datetime = Field(default_factory=_now, sa_type=sa.DateTime(timezone=True))
@@ -59,8 +60,8 @@ class MarketRound(SQLModel, table=True):
         ),
     )
 
-    id: int | None = Field(default=None, primary_key=True)
-    market_id: int = Field(foreign_key="market.id", index=True)
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    market_id: UUID = Field(foreign_key="market.id", index=True)
     sequence: int
     name: str = Field(max_length=120)
     kind: str = Field(sa_type=sa.String(16))
@@ -100,9 +101,9 @@ class MarketListing(SQLModel, table=True):
         ),
     )
 
-    id: int | None = Field(default=None, primary_key=True)
-    round_id: int = Field(foreign_key="market_round.id", index=True)
-    widget_id: int = Field(foreign_key="widget.id", index=True)
+    id: UUID = Field(default_factory=uuid4, primary_key=True)
+    round_id: UUID = Field(foreign_key="market_round.id", index=True)
+    widget_id: UUID = Field(foreign_key="widget.id", index=True)
     base_price: int = Field(sa_type=sa.BigInteger)
     supply_total: int | None = None
     stock_remaining: int | None = None
@@ -120,10 +121,28 @@ class MarketRoundEvent(SQLModel, table=True):
     __tablename__ = "market_round_event"
 
     id: int | None = Field(default=None, primary_key=True)
-    round_id: int = Field(foreign_key="market_round.id", index=True)
+    round_id: UUID = Field(foreign_key="market_round.id", index=True)
     action: str = Field(sa_type=sa.String(16))
     from_status: str = Field(sa_type=sa.String(16))
     to_status: str = Field(sa_type=sa.String(16))
     actor: str = Field(max_length=200)
     reason: str | None = Field(default=None, max_length=500)
+    created_at: datetime = Field(default_factory=_now, sa_type=sa.DateTime(timezone=True))
+
+
+class MarketAuctionLot(SQLModel, table=True):
+    """Units of an auction-round listing held for one Auction Engine (J) auction.
+
+    The units leave the listing's stock when the lot is created, so trading
+    and other lots can never promise them twice. J consumes the lot when it
+    awards the widgets; an unconsumed lot can be released back to stock.
+    """
+
+    __tablename__ = "market_auction_lot"
+    __table_args__ = (sa.CheckConstraint("quantity > 0", name="ck_market_auction_lot_quantity"),)
+
+    auction_id: UUID = Field(primary_key=True)  # J's auction id; no FK across owners
+    listing_id: UUID = Field(foreign_key="market_listing.id", index=True)
+    quantity: int
+    consumed: bool = False
     created_at: datetime = Field(default_factory=_now, sa_type=sa.DateTime(timezone=True))

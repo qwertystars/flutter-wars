@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
@@ -9,8 +10,10 @@ from app.core.db import get_session
 from app.core.errors import NotFound
 from app.modules.market import repository as repo
 from app.modules.market import service
-from app.modules.market.models import Market, MarketListing, MarketRound
+from app.modules.market.models import Market, MarketAuctionLot, MarketListing, MarketRound
 from app.modules.market.schemas import (
+    AuctionLotCreate,
+    AuctionLotOut,
     ListingAdminOut,
     ListingCreate,
     ListingOut,
@@ -173,19 +176,19 @@ def create_round(
 
 @admin.get("/rounds/{round_id}", response_model=RoundDetailOut)
 def get_round(
-    round_id: int, session: Session = Depends(get_session), now: datetime = Depends(get_now)
+    round_id: UUID, session: Session = Depends(get_session), now: datetime = Depends(get_now)
 ) -> RoundDetailOut:
     return _round_detail(session, service.get_round(session, round_id), now)
 
 
 @admin.get("/rounds/{round_id}/events", response_model=list[RoundEventOut])
-def round_events(round_id: int, session: Session = Depends(get_session)) -> list:
+def round_events(round_id: UUID, session: Session = Depends(get_session)) -> list:
     return service.round_events(session, round_id)
 
 
 def _transition_route(action: service.Action):
     def handler(
-        round_id: int,
+        round_id: UUID,
         body: TransitionIn | None = None,
         session: Session = Depends(get_session),
         now: datetime = Depends(get_now),
@@ -231,7 +234,7 @@ def _spec(item: ListingCreate) -> service.ListingSpec:
 
 @admin.post("/rounds/{round_id}/listings", response_model=ListingAdminOut, status_code=201)
 def add_listing(
-    round_id: int,
+    round_id: UUID,
     body: ListingCreate,
     session: Session = Depends(get_session),
     now: datetime = Depends(get_now),
@@ -243,7 +246,7 @@ def add_listing(
 
 @admin.patch("/listings/{listing_id}", response_model=ListingAdminOut)
 def update_listing(
-    listing_id: int,
+    listing_id: UUID,
     body: ListingUpdate,
     session: Session = Depends(get_session),
     now: datetime = Depends(get_now),
@@ -265,7 +268,7 @@ def update_listing(
 
 
 @admin.delete("/listings/{listing_id}", status_code=204)
-def delete_listing(listing_id: int, session: Session = Depends(get_session)) -> None:
+def delete_listing(listing_id: UUID, session: Session = Depends(get_session)) -> None:
     service.delete_listing(session, listing_id)
     session.commit()
 
@@ -276,3 +279,21 @@ def _one_listing(session: Session, listing: MarketListing, now: datetime) -> Lis
     return next(
         item for item in _listings_out(session, rnd, now, admin_view=True) if item.id == listing.id
     )
+
+
+@admin.post("/listings/{listing_id}/auction-lots", response_model=AuctionLotOut, status_code=201)
+def create_auction_lot(
+    listing_id: UUID, body: AuctionLotCreate, session: Session = Depends(get_session)
+) -> MarketAuctionLot:
+    lot = service.create_auction_lot(
+        session, listing_id, auction_id=body.auction_id, quantity=body.quantity
+    )
+    session.commit()
+    session.refresh(lot)
+    return lot
+
+
+@admin.delete("/auction-lots/{auction_id}", status_code=204)
+def release_auction_lot(auction_id: UUID, session: Session = Depends(get_session)) -> None:
+    service.release_auction_lot(session, auction_id)
+    session.commit()

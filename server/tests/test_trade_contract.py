@@ -2,6 +2,7 @@
 will call, the way docs/market.md and docs/pricing.md tell them to."""
 
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from sqlmodel import Session
@@ -99,7 +100,7 @@ def test_round_state_is_checked_inside_mutation(session: Session, widgets: list[
 
 def test_unknown_listing(session: Session) -> None:
     assert (
-        code_of(market.lock_listing_for_trade, session, 404, kind=RoundKind.TRADING)
+        code_of(market.lock_listing_for_trade, session, uuid4(), kind=RoundKind.TRADING)
         == "LISTING_NOT_FOUND"
     )
 
@@ -317,7 +318,7 @@ def test_api_pricing_endpoints(api, widgets: list[Widget], clock) -> None:
             "kind": "trading",
             "listings": [
                 {
-                    "widget_id": widgets[0].id,
+                    "widget_id": str(widgets[0].id),
                     "base_price": 100,
                     "supply": 100,
                     "pricing": {"strategy": "dynamic", "params": DYNAMIC},

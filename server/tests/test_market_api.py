@@ -3,6 +3,8 @@ import pytest
 from app.modules.catalog.models import Widget
 from tests.conftest import ORGANIZER, PARTICIPANT, Api
 
+MISSING = "00000000-0000-4000-8000-000000000000"
+
 
 def error_code(response) -> str:
     return response.json()["error"]["code"]
@@ -17,9 +19,9 @@ def create_round(api: Api, widgets: list[Widget], **overrides) -> dict:
         "name": "Round 1",
         "kind": "trading",
         "listings": [
-            {"widget_id": widgets[0].id, "base_price": 100, "supply": 10},
+            {"widget_id": str(widgets[0].id), "base_price": 100, "supply": 10},
             {
-                "widget_id": widgets[1].id,
+                "widget_id": str(widgets[1].id),
                 "base_price": 50,
                 "supply": "infinite",
                 "max_per_purchase": 3,
@@ -52,14 +54,14 @@ def test_unauthenticated_requests_are_rejected(api: Api) -> None:
         ("post", "/admin/market"),
         ("get", "/admin/market/rounds"),
         ("post", "/admin/market/rounds"),
-        ("get", "/admin/market/rounds/1"),
-        ("post", "/admin/market/rounds/1/open"),
-        ("post", "/admin/market/rounds/1/pause"),
-        ("post", "/admin/market/rounds/1/close"),
-        ("post", "/admin/market/rounds/1/finalize"),
-        ("post", "/admin/market/rounds/1/listings"),
-        ("patch", "/admin/market/listings/1"),
-        ("delete", "/admin/market/listings/1"),
+        ("get", "/admin/market/rounds/00000000-0000-4000-8000-000000000000"),
+        ("post", "/admin/market/rounds/00000000-0000-4000-8000-000000000000/open"),
+        ("post", "/admin/market/rounds/00000000-0000-4000-8000-000000000000/pause"),
+        ("post", "/admin/market/rounds/00000000-0000-4000-8000-000000000000/close"),
+        ("post", "/admin/market/rounds/00000000-0000-4000-8000-000000000000/finalize"),
+        ("post", "/admin/market/rounds/00000000-0000-4000-8000-000000000000/listings"),
+        ("patch", "/admin/market/listings/00000000-0000-4000-8000-000000000000"),
+        ("delete", "/admin/market/listings/00000000-0000-4000-8000-000000000000"),
         ("get", "/admin/market/listings/1/pricing"),
         ("patch", "/admin/market/listings/1/pricing"),
         ("get", "/admin/market/listings/1/price-history"),
@@ -102,7 +104,7 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
     rnd = create_round(api, widgets)
     assert rnd["status"] == "draft" and rnd["sequence"] == 1 and rnd["version"] == 1
     listings = {item["widget_id"]: item for item in rnd["listings"]}
-    finite, infinite = listings[widgets[0].id], listings[widgets[1].id]
+    finite, infinite = listings[str(widgets[0].id)], listings[str(widgets[1].id)]
     assert finite["stock_remaining"] == 10 and not finite["infinite_supply"]
     assert (
         infinite["infinite_supply"]
@@ -133,10 +135,10 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
     body = api.get("/market/listings").json()
     assert body["round"]["id"] == rnd["id"]
     shown = {item["widget_id"]: item for item in body["listings"]}
-    assert shown[widgets[0].id]["price"]["amount"] == 100
-    assert shown[widgets[0].id]["widget_name"] == "Button"
-    assert shown[widgets[1].id]["price"]["valid_until"] is None
-    assert "pricing" not in shown[widgets[0].id]  # admin-only config
+    assert shown[str(widgets[0].id)]["price"]["amount"] == 100
+    assert shown[str(widgets[0].id)]["widget_name"] == "Button"
+    assert shown[str(widgets[1].id)]["price"]["valid_until"] is None
+    assert "pricing" not in shown[str(widgets[0].id)]  # admin-only config
     price = api.get(f"/market/listings/{finite['id']}/price").json()
     assert price["price"] == 100 and price["strategy"] == "static"
 
@@ -191,7 +193,7 @@ def test_invalid_transitions_rejected(
 
 
 def test_unknown_round(api: Api) -> None:
-    assert error_code(act(api, 999, "open")) == "ROUND_NOT_FOUND"
+    assert error_code(act(api, MISSING, "open")) == "ROUND_NOT_FOUND"
 
 
 def test_round_without_listings_cannot_open(api: Api, widgets: list[Widget]) -> None:
@@ -248,19 +250,23 @@ def test_listing_validation(api: Api, widgets: list[Widget]) -> None:
     setup_market(api)
     rnd = create_round(api, widgets, listings=[])
     url = f"/admin/market/rounds/{rnd['id']}/listings"
-    ok = api.post(url, json={"widget_id": widgets[2].id, "base_price": 10, "supply": 0})
+    ok = api.post(url, json={"widget_id": str(widgets[2].id), "base_price": 10, "supply": 0})
     assert ok.status_code == 201 and ok.json()["sold_out"] is True
 
     assert (
-        error_code(api.post(url, json={"widget_id": widgets[2].id, "base_price": 10, "supply": 5}))
+        error_code(
+            api.post(url, json={"widget_id": str(widgets[2].id), "base_price": 10, "supply": 5})
+        )
         == "DUPLICATE_LISTING"
     )
     assert (
-        error_code(api.post(url, json={"widget_id": 999, "base_price": 10, "supply": 5}))
+        error_code(api.post(url, json={"widget_id": MISSING, "base_price": 10, "supply": 5}))
         == "WIDGET_NOT_FOUND"
     )
     assert (
-        error_code(api.post(url, json={"widget_id": widgets[4].id, "base_price": 10, "supply": 5}))
+        error_code(
+            api.post(url, json={"widget_id": str(widgets[4].id), "base_price": 10, "supply": 5})
+        )
         == "WIDGET_ARCHIVED"
     )
     for bad in (
@@ -269,11 +275,11 @@ def test_listing_validation(api: Api, widgets: list[Widget]) -> None:
         {"base_price": 10, "supply": "lots"},
         {"base_price": 10, "supply": 5, "price": 1},
     ):
-        assert api.post(url, json={"widget_id": widgets[3].id} | bad).status_code == 422
+        assert api.post(url, json={"widget_id": str(widgets[3].id)} | bad).status_code == 422
     dynamic_infinite = api.post(
         url,
         json={
-            "widget_id": widgets[3].id,
+            "widget_id": str(widgets[3].id),
             "base_price": 10,
             "supply": "infinite",
             "pricing": {"strategy": "dynamic"},
@@ -283,7 +289,7 @@ def test_listing_validation(api: Api, widgets: list[Widget]) -> None:
     unknown = api.post(
         url,
         json={
-            "widget_id": widgets[3].id,
+            "widget_id": str(widgets[3].id),
             "base_price": 10,
             "supply": 1,
             "pricing": {"strategy": "x"},
@@ -339,7 +345,7 @@ def test_listings_frozen_after_open(api: Api, widgets: list[Widget]) -> None:
         api.delete(f"/admin/market/listings/{listing['id']}"),
         api.post(
             f"/admin/market/rounds/{rnd['id']}/listings",
-            json={"widget_id": widgets[2].id, "base_price": 1, "supply": 1},
+            json={"widget_id": str(widgets[2].id), "base_price": 1, "supply": 1},
         ),
     ):
         assert response.status_code == 409
@@ -354,7 +360,7 @@ def test_archived_widget_blocks_open(api: Api, widgets: list[Widget], session) -
     session.commit()
     response = act(api, rnd["id"], "open")
     assert error_code(response) == "ROUND_HAS_ARCHIVED_WIDGETS"
-    assert response.json()["error"]["context"]["widget_ids"] == [widgets[0].id]
+    assert response.json()["error"]["context"]["widget_ids"] == [str(widgets[0].id)]
 
 
 def test_widget_in_several_rounds_keeps_history(api: Api, widgets: list[Widget]) -> None:
@@ -367,13 +373,13 @@ def test_widget_in_several_rounds_keeps_history(api: Api, widgets: list[Widget])
         widgets,
         name="Round 2",
         listings=[
-            {"widget_id": widgets[0].id, "base_price": 300, "supply": 2},
+            {"widget_id": str(widgets[0].id), "base_price": 300, "supply": 2},
         ],
     )
     api.patch(f"/admin/market/listings/{second['listings'][0]['id']}", json={"base_price": 350})
 
     old = api.get(f"/admin/market/rounds/{first['id']}").json()
-    button = next(item for item in old["listings"] if item["widget_id"] == widgets[0].id)
+    button = next(item for item in old["listings"] if item["widget_id"] == str(widgets[0].id))
     assert button["base_price"] == 100 and button["supply_total"] == 10
 
     api.as_(PARTICIPANT)
