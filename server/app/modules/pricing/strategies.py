@@ -37,8 +37,10 @@ class PricingStrategy[P: BaseModel](ABC):
             params = self.params_model.model_validate(raw)
         except ValidationError as exc:
             raise AppError(
-                "INVALID_PRICING_PARAMS", "Pricing parameters are invalid.",
-                strategy=self.key, errors=exc.errors(include_url=False, include_context=False),
+                "INVALID_PRICING_PARAMS",
+                "Pricing parameters are invalid.",
+                strategy=self.key,
+                errors=exc.errors(include_url=False, include_context=False),
             ) from None
         self.check_supply(params, infinite_supply=infinite_supply)
         return params  # type: ignore[return-value]
@@ -75,7 +77,9 @@ class StaticStrategy(PricingStrategy[StaticParams]):
 class DemandBand(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    below: Decimal | None = Field(default=None, gt=0, description="Upper bound of the demand ratio; null = catch-all")
+    below: Decimal | None = Field(
+        default=None, gt=0, description="Upper bound of the demand ratio; null = catch-all"
+    )
     multiplier: Decimal = Field(gt=0, le=10)
 
 
@@ -98,7 +102,9 @@ class DynamicParams(BaseModel):
 
     interval_seconds: int = Field(default=120, ge=10, le=86_400)
     target_fraction: Decimal = Field(default=Decimal("0.1"), gt=0, le=1)
-    bands: list[DemandBand] = Field(default_factory=lambda: list(DEFAULT_BANDS), min_length=1, max_length=20)
+    bands: list[DemandBand] = Field(
+        default_factory=lambda: list(DEFAULT_BANDS), min_length=1, max_length=20
+    )
     min_factor: Decimal = Field(default=Decimal("0.75"), gt=0, le=1)
     max_factor: Decimal = Field(default=Decimal("2"), ge=1, le=100)
     price_step: int = Field(default=5, ge=1, le=1_000_000)
@@ -135,9 +141,13 @@ class DynamicSupplyDemandStrategy(PricingStrategy[DynamicParams]):
             return data.current_price
         demand = max(data.bought - data.sold, 0)
         ratio = Decimal(demand) / (Decimal(data.supply_at_start) * params.target_fraction)
-        multiplier = next(band.multiplier for band in params.bands if band.below is None or ratio < band.below)
+        multiplier = next(
+            band.multiplier for band in params.bands if band.below is None or ratio < band.below
+        )
         step = Decimal(params.price_step)
-        raw = (Decimal(data.current_price) * multiplier / step).quantize(Decimal(1), rounding=ROUND_HALF_UP) * step
+        raw = (Decimal(data.current_price) * multiplier / step).quantize(
+            Decimal(1), rounding=ROUND_HALF_UP
+        ) * step
         lower = math.ceil(Decimal(data.base_price) * params.min_factor / step) * params.price_step
         upper = math.floor(Decimal(data.base_price) * params.max_factor / step) * params.price_step
         lower = max(lower, params.price_step)
@@ -159,7 +169,12 @@ def get_strategy(key: str) -> PricingStrategy[Any]:
     try:
         return _REGISTRY[key]
     except KeyError:
-        raise AppError("UNKNOWN_PRICING_STRATEGY", "Unknown pricing strategy.", strategy=key, available=sorted(_REGISTRY)) from None
+        raise AppError(
+            "UNKNOWN_PRICING_STRATEGY",
+            "Unknown pricing strategy.",
+            strategy=key,
+            available=sorted(_REGISTRY),
+        ) from None
 
 
 def available_strategies() -> list[str]:

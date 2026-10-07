@@ -67,12 +67,21 @@ class _Advanced:
     valid_until: datetime | None
 
 
-def _advance(state: ListingPricing, listing: MarketListing, rnd: MarketRound, now: datetime) -> _Advanced:
+def _advance(
+    state: ListingPricing, listing: MarketListing, rnd: MarketRound, now: datetime
+) -> _Advanced:
     """Apply every elapsed interval boundary to `state` without mutating it."""
     strategy = get_strategy(state.strategy)
     params = strategy.params_model.model_validate(state.params)
     seconds = strategy.interval_seconds(params)
-    unchanged = _Advanced(state.current_price, state.interval_index, state.interval_bought, state.interval_sold, [], None)
+    unchanged = _Advanced(
+        state.current_price,
+        state.interval_index,
+        state.interval_bought,
+        state.interval_sold,
+        [],
+        None,
+    )
     if seconds is None or rnd.opened_at is None:
         return unchanged
 
@@ -92,11 +101,14 @@ def _advance(state: ListingPricing, listing: MarketListing, rnd: MarketRound, no
     steps: list[_Step] = []
     while index < target:
         new_price = strategy.next_price(
-            params, PricingInput(listing.base_price, price, bought, sold, supply),
+            params,
+            PricingInput(listing.base_price, price, bought, sold, supply),
         )
         index += 1
         if new_price != price:
-            steps.append(_Step(index, new_price, price, bought - sold, supply, anchor + index * interval))
+            steps.append(
+                _Step(index, new_price, price, bought - sold, supply, anchor + index * interval)
+            )
         quiet = bought == 0 and sold == 0
         stable = new_price == price
         price, bought, sold, supply = new_price, 0, 0, stock
@@ -118,12 +130,20 @@ def _persist(session: Session, state: ListingPricing, result: _Advanced, now: da
     if result.interval_index == state.interval_index:
         return
     for step in result.steps:
-        session.add(PriceHistory(
-            listing_id=state.listing_id, interval_index=step.interval_index, price=step.price,
-            previous_price=step.previous_price, reason=PriceChangeReason.INTERVAL, strategy=state.strategy,
-            params_version=state.params_version, demand=step.demand, supply=step.supply,
-            effective_at=step.effective_at,
-        ))
+        session.add(
+            PriceHistory(
+                listing_id=state.listing_id,
+                interval_index=step.interval_index,
+                price=step.price,
+                previous_price=step.previous_price,
+                reason=PriceChangeReason.INTERVAL,
+                strategy=state.strategy,
+                params_version=state.params_version,
+                demand=step.demand,
+                supply=step.supply,
+                effective_at=step.effective_at,
+            )
+        )
     state.current_price = result.price
     state.interval_index = result.interval_index
     state.interval_bought = result.bought
@@ -133,10 +153,14 @@ def _persist(session: Session, state: ListingPricing, result: _Advanced, now: da
 
 
 def _quote(state: ListingPricing, result: _Advanced) -> PriceQuote:
-    return PriceQuote(state.listing_id, result.price, state.strategy, result.interval_index, result.valid_until)
+    return PriceQuote(
+        state.listing_id, result.price, state.strategy, result.interval_index, result.valid_until
+    )
 
 
-def _load_for_update(session: Session, listing_id: int) -> tuple[ListingPricing, MarketListing, MarketRound]:
+def _load_for_update(
+    session: Session, listing_id: int
+) -> tuple[ListingPricing, MarketListing, MarketRound]:
     """Lock round (shared) then pricing row (exclusive), the same order trades
     use, and return fresh copies. The listing is read after the pricing lock,
     so its stock is consistent with the interval counters: every stock change
@@ -145,12 +169,16 @@ def _load_for_update(session: Session, listing_id: int) -> tuple[ListingPricing,
     if listing is None:
         raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
     rnd = session.exec(
-        select(MarketRound).where(MarketRound.id == listing.round_id)
-        .with_for_update(read=True).execution_options(populate_existing=True),
+        select(MarketRound)
+        .where(MarketRound.id == listing.round_id)
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True),
     ).one()
     state = session.exec(
-        select(ListingPricing).where(ListingPricing.listing_id == listing_id)
-        .with_for_update().execution_options(populate_existing=True),
+        select(ListingPricing)
+        .where(ListingPricing.listing_id == listing_id)
+        .with_for_update()
+        .execution_options(populate_existing=True),
     ).one_or_none()
     if state is None:
         raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
@@ -158,7 +186,9 @@ def _load_for_update(session: Session, listing_id: int) -> tuple[ListingPricing,
     return state, listing, rnd
 
 
-def _snapshot(session: Session, *conditions: Any) -> list[tuple[ListingPricing, MarketListing, MarketRound]]:
+def _snapshot(
+    session: Session, *conditions: Any
+) -> list[tuple[ListingPricing, MarketListing, MarketRound]]:
     """Pricing state, listing and round read in ONE statement, so a quote never
     mixes counters from before a trade with stock from after it."""
     rows = session.exec(
@@ -173,13 +203,18 @@ def _snapshot(session: Session, *conditions: Any) -> list[tuple[ListingPricing, 
 
 # --- configuration (called by the Market module while a round is a draft) ---
 
-def configure_listing(session: Session, listing: MarketListing, strategy_key: str, params: dict[str, Any]) -> ListingPricing:
+
+def configure_listing(
+    session: Session, listing: MarketListing, strategy_key: str, params: dict[str, Any]
+) -> ListingPricing:
     """Create or reset pricing for a listing in a draft round."""
     strategy = get_strategy(strategy_key)
     parsed = strategy.parse_params(params, infinite_supply=listing.infinite_supply)
     state = session.get(ListingPricing, listing.id)
     if state is None:
-        state = ListingPricing(listing_id=listing.id, strategy=strategy_key, current_price=listing.base_price)
+        state = ListingPricing(
+            listing_id=listing.id, strategy=strategy_key, current_price=listing.base_price
+        )
     else:
         state.params_version += 1
     state.strategy = strategy_key
@@ -206,18 +241,31 @@ def remove_listing(session: Session, listing_id: int) -> None:
 def on_round_opened(session: Session, listing_ids: Iterable[int], opened_at: datetime) -> None:
     """Record the opening price of every listing when a round first opens."""
     states = session.exec(
-        select(ListingPricing).where(col(ListingPricing.listing_id).in_(list(listing_ids)))
+        select(ListingPricing)
+        .where(col(ListingPricing.listing_id).in_(list(listing_ids)))
         .execution_options(populate_existing=True),
     ).all()
     for state in states:
-        session.add(PriceHistory(
-            listing_id=state.listing_id, interval_index=0, price=state.current_price, reason=PriceChangeReason.INITIAL,
-            strategy=state.strategy, params_version=state.params_version, effective_at=opened_at,
-        ))
+        session.add(
+            PriceHistory(
+                listing_id=state.listing_id,
+                interval_index=0,
+                price=state.current_price,
+                reason=PriceChangeReason.INITIAL,
+                strategy=state.strategy,
+                params_version=state.params_version,
+                effective_at=opened_at,
+            )
+        )
 
 
 def update_pricing(
-    session: Session, listing_id: int, *, strategy: str | None, params: dict[str, Any], now: datetime,
+    session: Session,
+    listing_id: int,
+    *,
+    strategy: str | None,
+    params: dict[str, Any],
+    now: datetime,
 ) -> ListingPricing:
     """Organizer edit. Draft rounds: strategy and params may change and the
     price resets to base. Live rounds: params only (see update_params)."""
@@ -226,24 +274,30 @@ def update_pricing(
         return configure_listing(session, listing, strategy or state.strategy, params)
     if strategy is not None and strategy != state.strategy:
         raise Conflict(
-            "PRICING_STRATEGY_LOCKED", "The pricing strategy cannot change after the round has opened.",
+            "PRICING_STRATEGY_LOCKED",
+            "The pricing strategy cannot change after the round has opened.",
             strategy=state.strategy,
         )
     return update_params(session, listing_id, params, now)
 
 
-def update_params(session: Session, listing_id: int, params: dict[str, Any], now: datetime) -> ListingPricing:
+def update_params(
+    session: Session, listing_id: int, params: dict[str, Any], now: datetime
+) -> ListingPricing:
     """Change parameters of a live listing. Elapsed intervals are settled with
     the old parameters first; the new ones apply from the next boundary."""
     state, listing, rnd = _load_for_update(session, listing_id)
     if rnd.status not in (RoundStatus.OPEN, RoundStatus.PAUSED):
-        raise Conflict("PRICING_NOT_EDITABLE", "Pricing of a closed round cannot change.", status=rnd.status)
+        raise Conflict(
+            "PRICING_NOT_EDITABLE", "Pricing of a closed round cannot change.", status=rnd.status
+        )
     strategy = get_strategy(state.strategy)
     old = strategy.params_model.model_validate(state.params)
     new = strategy.parse_params(params, infinite_supply=listing.infinite_supply)
     if strategy.interval_seconds(new) != strategy.interval_seconds(old):
         raise Conflict(
-            "PRICING_INTERVAL_LOCKED", "The repricing interval cannot change after the round has opened.",
+            "PRICING_INTERVAL_LOCKED",
+            "The repricing interval cannot change after the round has opened.",
             interval_seconds=strategy.interval_seconds(old),
         )
     _persist(session, state, _advance(state, listing, rnd, now), now)
@@ -251,15 +305,23 @@ def update_params(session: Session, listing_id: int, params: dict[str, Any], now
     state.params_version += 1
     _touch(state, now)
     session.add(state)
-    session.add(PriceHistory(
-        listing_id=listing_id, interval_index=state.interval_index, price=state.current_price,
-        previous_price=state.current_price, reason=PriceChangeReason.CONFIG_CHANGE, strategy=state.strategy,
-        params_version=state.params_version, effective_at=now,
-    ))
+    session.add(
+        PriceHistory(
+            listing_id=listing_id,
+            interval_index=state.interval_index,
+            price=state.current_price,
+            previous_price=state.current_price,
+            reason=PriceChangeReason.CONFIG_CHANGE,
+            strategy=state.strategy,
+            params_version=state.params_version,
+            effective_at=now,
+        )
+    )
     return state
 
 
 # --- reads ---
+
 
 def quote(session: Session, listing_id: int, now: datetime) -> PriceQuote:
     """Participant-visible price. Read-only: computes, never persists."""
@@ -284,18 +346,25 @@ def latest_activity(session: Session, listing_ids: list[int]) -> datetime | None
     if not listing_ids:
         return None
     latest = session.exec(
-        select(func.max(ListingPricing.updated_at)).where(col(ListingPricing.listing_id).in_(listing_ids)),
+        select(func.max(ListingPricing.updated_at)).where(
+            col(ListingPricing.listing_id).in_(listing_ids)
+        ),
     ).one()
     return as_utc(latest) if latest else None
 
 
 def price_history(session: Session, listing_id: int) -> list[PriceHistory]:
-    return list(session.exec(
-        select(PriceHistory).where(PriceHistory.listing_id == listing_id).order_by(col(PriceHistory.id)),
-    ))
+    return list(
+        session.exec(
+            select(PriceHistory)
+            .where(PriceHistory.listing_id == listing_id)
+            .order_by(col(PriceHistory.id)),
+        )
+    )
 
 
 # --- internal contract for Transaction (I) ---
+
 
 def get_current_price(session: Session, listing_id: int, now: datetime) -> PriceQuote:
     """Authoritative price for a trade. Locks the listing's pricing row until
@@ -312,7 +381,9 @@ def recalculate(session: Session, listing_id: int, now: datetime) -> PriceQuote:
     return get_current_price(session, listing_id, now)
 
 
-def record_trade(session: Session, listing_id: int, quantity: int, side: TradeSide, now: datetime) -> None:
+def record_trade(
+    session: Session, listing_id: int, quantity: int, side: TradeSide, now: datetime
+) -> None:
     """Count a committed-in-this-transaction trade towards the current
     interval's demand. Call in the same transaction as the stock change."""
     if quantity < 1:

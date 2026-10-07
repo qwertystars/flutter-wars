@@ -18,7 +18,12 @@ def create_round(api: Api, widgets: list[Widget], **overrides) -> dict:
         "kind": "trading",
         "listings": [
             {"widget_id": widgets[0].id, "base_price": 100, "supply": 10},
-            {"widget_id": widgets[1].id, "base_price": 50, "supply": "infinite", "max_per_purchase": 3},
+            {
+                "widget_id": widgets[1].id,
+                "base_price": 50,
+                "supply": "infinite",
+                "max_per_purchase": 3,
+            },
         ],
     } | overrides
     response = api.post("/admin/market/rounds", json=body)
@@ -31,6 +36,7 @@ def act(api: Api, round_id: int, action: str, **body):
 
 
 # --- authorization ---
+
 
 def test_unauthenticated_requests_are_rejected(api: Api) -> None:
     api.as_(None)
@@ -69,6 +75,7 @@ def test_participants_cannot_use_admin_routes(api: Api, method: str, path: str) 
 
 # --- market + round lifecycle ---
 
+
 def test_market_summary_before_setup(api: Api) -> None:
     api.as_(PARTICIPANT)
     body = api.get("/market").json()
@@ -97,13 +104,21 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
     listings = {item["widget_id"]: item for item in rnd["listings"]}
     finite, infinite = listings[widgets[0].id], listings[widgets[1].id]
     assert finite["stock_remaining"] == 10 and not finite["infinite_supply"]
-    assert infinite["infinite_supply"] and infinite["stock_remaining"] is None and infinite["supply_total"] is None
+    assert (
+        infinite["infinite_supply"]
+        and infinite["stock_remaining"] is None
+        and infinite["supply_total"] is None
+    )
     assert finite["pricing"]["strategy"] == "static"
 
     # Drafts are invisible to participants.
     api.as_(PARTICIPANT)
     assert api.get("/market").json()["current_round"] is None
-    assert api.get("/market/listings").json() == {"round": None, "listings": [], "server_time": clock.now.isoformat().replace("+00:00", "Z")}
+    assert api.get("/market/listings").json() == {
+        "round": None,
+        "listings": [],
+        "server_time": clock.now.isoformat().replace("+00:00", "Z"),
+    }
     assert error_code(api.get(f"/market/listings/{finite['id']}/price")) == "LISTING_NOT_FOUND"
 
     api.as_(ORGANIZER)
@@ -136,8 +151,11 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
 
     events = api.get(f"/admin/market/rounds/{rnd['id']}/events").json()
     assert [(e["action"], e["from_status"], e["to_status"]) for e in events] == [
-        ("open", "draft", "open"), ("pause", "open", "paused"), ("open", "paused", "open"),
-        ("close", "open", "closed"), ("finalize", "closed", "finalized"),
+        ("open", "draft", "open"),
+        ("pause", "open", "paused"),
+        ("open", "paused", "open"),
+        ("close", "open", "closed"),
+        ("finalize", "closed", "finalized"),
     ]
     assert events[0]["actor"] == ORGANIZER.subject and events[0]["reason"] == "go"
 
@@ -149,14 +167,20 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
 @pytest.mark.parametrize(
     ("setup", "action"),
     [
-        ([], "pause"), ([], "close"), ([], "finalize"),
-        (["open"], "finalize"), (["open"], "open"),
+        ([], "pause"),
+        ([], "close"),
+        ([], "finalize"),
+        (["open"], "finalize"),
+        (["open"], "open"),
         (["open", "pause"], "pause"),
-        (["open", "close"], "open"), (["open", "close"], "pause"),
+        (["open", "close"], "open"),
+        (["open", "close"], "pause"),
         (["open", "close", "finalize"], "close"),
     ],
 )
-def test_invalid_transitions_rejected(api: Api, widgets: list[Widget], setup: list[str], action: str) -> None:
+def test_invalid_transitions_rejected(
+    api: Api, widgets: list[Widget], setup: list[str], action: str
+) -> None:
     setup_market(api)
     rnd = create_round(api, widgets)
     for step in setup:
@@ -205,14 +229,20 @@ def test_stale_expected_version_rejected(api: Api, widgets: list[Widget]) -> Non
 
 def test_schedule_must_be_ordered(api: Api, widgets: list[Widget]) -> None:
     setup_market(api)
-    response = api.post("/admin/market/rounds", json={
-        "name": "R", "kind": "trading",
-        "scheduled_open_at": "2026-10-12T10:00:00Z", "scheduled_close_at": "2026-10-12T09:00:00Z",
-    })
+    response = api.post(
+        "/admin/market/rounds",
+        json={
+            "name": "R",
+            "kind": "trading",
+            "scheduled_open_at": "2026-10-12T10:00:00Z",
+            "scheduled_close_at": "2026-10-12T09:00:00Z",
+        },
+    )
     assert error_code(response) == "INVALID_SCHEDULE"
 
 
 # --- listings ---
+
 
 def test_listing_validation(api: Api, widgets: list[Widget]) -> None:
     setup_market(api)
@@ -221,17 +251,44 @@ def test_listing_validation(api: Api, widgets: list[Widget]) -> None:
     ok = api.post(url, json={"widget_id": widgets[2].id, "base_price": 10, "supply": 0})
     assert ok.status_code == 201 and ok.json()["sold_out"] is True
 
-    assert error_code(api.post(url, json={"widget_id": widgets[2].id, "base_price": 10, "supply": 5})) == "DUPLICATE_LISTING"
-    assert error_code(api.post(url, json={"widget_id": 999, "base_price": 10, "supply": 5})) == "WIDGET_NOT_FOUND"
-    assert error_code(api.post(url, json={"widget_id": widgets[4].id, "base_price": 10, "supply": 5})) == "WIDGET_ARCHIVED"
-    for bad in ({"base_price": 0, "supply": 5}, {"base_price": 10, "supply": -1}, {"base_price": 10, "supply": "lots"},
-                {"base_price": 10, "supply": 5, "price": 1}):
+    assert (
+        error_code(api.post(url, json={"widget_id": widgets[2].id, "base_price": 10, "supply": 5}))
+        == "DUPLICATE_LISTING"
+    )
+    assert (
+        error_code(api.post(url, json={"widget_id": 999, "base_price": 10, "supply": 5}))
+        == "WIDGET_NOT_FOUND"
+    )
+    assert (
+        error_code(api.post(url, json={"widget_id": widgets[4].id, "base_price": 10, "supply": 5}))
+        == "WIDGET_ARCHIVED"
+    )
+    for bad in (
+        {"base_price": 0, "supply": 5},
+        {"base_price": 10, "supply": -1},
+        {"base_price": 10, "supply": "lots"},
+        {"base_price": 10, "supply": 5, "price": 1},
+    ):
         assert api.post(url, json={"widget_id": widgets[3].id} | bad).status_code == 422
-    dynamic_infinite = api.post(url, json={
-        "widget_id": widgets[3].id, "base_price": 10, "supply": "infinite", "pricing": {"strategy": "dynamic"},
-    })
+    dynamic_infinite = api.post(
+        url,
+        json={
+            "widget_id": widgets[3].id,
+            "base_price": 10,
+            "supply": "infinite",
+            "pricing": {"strategy": "dynamic"},
+        },
+    )
     assert error_code(dynamic_infinite) == "PRICING_REQUIRES_FINITE_SUPPLY"
-    unknown = api.post(url, json={"widget_id": widgets[3].id, "base_price": 10, "supply": 1, "pricing": {"strategy": "x"}})
+    unknown = api.post(
+        url,
+        json={
+            "widget_id": widgets[3].id,
+            "base_price": 10,
+            "supply": 1,
+            "pricing": {"strategy": "x"},
+        },
+    )
     assert error_code(unknown) == "UNKNOWN_PRICING_STRATEGY"
 
 
@@ -241,13 +298,25 @@ def test_draft_listing_edit_and_delete(api: Api, widgets: list[Widget]) -> None:
     listing = rnd["listings"][0]
     url = f"/admin/market/listings/{listing['id']}"
 
-    edited = api.patch(url, json={"base_price": 120, "supply": "infinite", "max_per_purchase": 2}).json()
-    assert edited["base_price"] == 120 and edited["infinite_supply"] and edited["max_per_purchase"] == 2
+    edited = api.patch(
+        url, json={"base_price": 120, "supply": "infinite", "max_per_purchase": 2}
+    ).json()
+    assert (
+        edited["base_price"] == 120
+        and edited["infinite_supply"]
+        and edited["max_per_purchase"] == 2
+    )
     assert edited["price"]["amount"] == 120
 
-    edited = api.patch(url, json={"supply": 4, "pricing": {"strategy": "dynamic", "params": {"interval_seconds": 60}}}).json()
+    edited = api.patch(
+        url,
+        json={"supply": 4, "pricing": {"strategy": "dynamic", "params": {"interval_seconds": 60}}},
+    ).json()
     assert edited["stock_remaining"] == 4
-    assert edited["pricing"]["strategy"] == "dynamic" and edited["pricing"]["params"]["interval_seconds"] == 60
+    assert (
+        edited["pricing"]["strategy"] == "dynamic"
+        and edited["pricing"]["params"]["interval_seconds"] == 60
+    )
 
     # Changing only the price keeps the dynamic configuration.
     edited = api.patch(url, json={"base_price": 80}).json()
@@ -268,7 +337,10 @@ def test_listings_frozen_after_open(api: Api, widgets: list[Widget]) -> None:
     for response in (
         api.patch(f"/admin/market/listings/{listing['id']}", json={"base_price": 1}),
         api.delete(f"/admin/market/listings/{listing['id']}"),
-        api.post(f"/admin/market/rounds/{rnd['id']}/listings", json={"widget_id": widgets[2].id, "base_price": 1, "supply": 1}),
+        api.post(
+            f"/admin/market/rounds/{rnd['id']}/listings",
+            json={"widget_id": widgets[2].id, "base_price": 1, "supply": 1},
+        ),
     ):
         assert response.status_code == 409
         assert error_code(response) == "ROUND_NOT_EDITABLE"
@@ -290,9 +362,14 @@ def test_widget_in_several_rounds_keeps_history(api: Api, widgets: list[Widget])
     first = create_round(api, widgets)
     act(api, first["id"], "open")
     act(api, first["id"], "close")
-    second = create_round(api, widgets, name="Round 2", listings=[
-        {"widget_id": widgets[0].id, "base_price": 300, "supply": 2},
-    ])
+    second = create_round(
+        api,
+        widgets,
+        name="Round 2",
+        listings=[
+            {"widget_id": widgets[0].id, "base_price": 300, "supply": 2},
+        ],
+    )
     api.patch(f"/admin/market/listings/{second['listings'][0]['id']}", json={"base_price": 350})
 
     old = api.get(f"/admin/market/rounds/{first['id']}").json()

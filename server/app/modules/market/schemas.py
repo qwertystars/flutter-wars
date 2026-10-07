@@ -17,6 +17,7 @@ class _In(BaseModel):
 
 # --- requests ---
 
+
 class MarketCreate(_In):
     name: str = Field(min_length=1, max_length=120)
 
@@ -52,11 +53,14 @@ class RoundCreate(_In):
 
 
 class TransitionIn(_In):
-    expected_version: int | None = Field(default=None, description="Reject if the round changed since this version.")
+    expected_version: int | None = Field(
+        default=None, description="Reject if the round changed since this version."
+    )
     reason: str | None = Field(default=None, max_length=500)
 
 
 # --- responses ---
+
 
 class MarketOut(BaseModel):
     id: int
@@ -89,7 +93,9 @@ class PriceOut(BaseModel):
     amount: int
     strategy: str
     interval_index: int
-    valid_until: datetime | None = Field(description="Earliest time the price may change; null if no change is scheduled.")
+    valid_until: datetime | None = Field(
+        description="Earliest time the price may change; null if no change is scheduled."
+    )
 
 
 class ListingOut(BaseModel):

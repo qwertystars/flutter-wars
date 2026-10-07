@@ -54,6 +54,7 @@ class ListingSpec:
 
 # --- markets ---
 
+
 def create_market(session: Session, name: str) -> Market:
     if repo.active_market(session) is not None:
         raise Conflict("MARKET_ALREADY_ACTIVE", "An active market already exists.")
@@ -75,25 +76,40 @@ def require_active_market(session: Session) -> Market:
 
 # --- rounds ---
 
+
 def create_round(
-    session: Session, *, name: str, kind: RoundKind, listings: list[ListingSpec],
-    scheduled_open_at: datetime | None = None, scheduled_close_at: datetime | None = None,
+    session: Session,
+    *,
+    name: str,
+    kind: RoundKind,
+    listings: list[ListingSpec],
+    scheduled_open_at: datetime | None = None,
+    scheduled_close_at: datetime | None = None,
 ) -> MarketRound:
     market = require_active_market(session)
     if scheduled_open_at and scheduled_close_at and scheduled_close_at <= scheduled_open_at:
         raise AppError("INVALID_SCHEDULE", "scheduled_close_at must be after scheduled_open_at.")
-    sequence = (session.exec(
-        select(func.max(MarketRound.sequence)).where(MarketRound.market_id == market.id),
-    ).one() or 0) + 1
+    sequence = (
+        session.exec(
+            select(func.max(MarketRound.sequence)).where(MarketRound.market_id == market.id),
+        ).one()
+        or 0
+    ) + 1
     rnd = MarketRound(
-        market_id=market.id, sequence=sequence, name=name, kind=kind,
-        scheduled_open_at=scheduled_open_at, scheduled_close_at=scheduled_close_at,
+        market_id=market.id,
+        sequence=sequence,
+        name=name,
+        kind=kind,
+        scheduled_open_at=scheduled_open_at,
+        scheduled_close_at=scheduled_close_at,
     )
     session.add(rnd)
     try:
         session.flush()
     except IntegrityError:
-        raise Conflict("ROUND_CREATE_CONFLICT", "Another round was created at the same time; retry.") from None
+        raise Conflict(
+            "ROUND_CREATE_CONFLICT", "Another round was created at the same time; retry."
+        ) from None
     for spec in listings:
         add_listing(session, rnd.id, spec)
     return rnd
@@ -115,8 +131,10 @@ def lock_round(session: Session, round_id: int, *, exclusive: bool = False) -> M
     the shared lock; lifecycle transitions and draft edits take the exclusive
     one, so draft edits are serialised with each other and with opening."""
     rnd = session.exec(
-        select(MarketRound).where(MarketRound.id == round_id)
-        .with_for_update(read=not exclusive).execution_options(populate_existing=True),
+        select(MarketRound)
+        .where(MarketRound.id == round_id)
+        .with_for_update(read=not exclusive)
+        .execution_options(populate_existing=True),
     ).one_or_none()
     if rnd is None:
         raise NotFound("ROUND_NOT_FOUND", "Round not found.", round_id=round_id)
@@ -132,8 +150,14 @@ def current_round(session: Session) -> MarketRound | None:
 
 
 def transition(
-    session: Session, round_id: int, action: Action, *, now: datetime, actor: str,
-    reason: str | None = None, expected_version: int | None = None,
+    session: Session,
+    round_id: int,
+    action: Action,
+    *,
+    now: datetime,
+    actor: str,
+    reason: str | None = None,
+    expected_version: int | None = None,
 ) -> MarketRound:
     # Waits for in-flight trades and draft edits (which hold the row FOR SHARE),
     # so every check below sees their committed effects.
@@ -143,13 +167,18 @@ def transition(
     # A stale view is reported as such, even if the action is also invalid now.
     if expected_version is not None and expected_version != from_version:
         raise Conflict(
-            "ROUND_VERSION_CONFLICT", "The round was changed by someone else.", version=from_version, status=from_status,
+            "ROUND_VERSION_CONFLICT",
+            "The round was changed by someone else.",
+            version=from_version,
+            status=from_status,
         )
     allowed, target = TRANSITIONS[action]
     if from_status not in allowed:
         raise Conflict(
-            "INVALID_ROUND_TRANSITION", f"Cannot {action} a round that is {from_status}.",
-            action=action, status=from_status,
+            "INVALID_ROUND_TRANSITION",
+            f"Cannot {action} a round that is {from_status}.",
+            action=action,
+            status=from_status,
         )
 
     first_open = action == "open" and from_status == RoundStatus.DRAFT
@@ -157,13 +186,23 @@ def transition(
     if target in LIVE_STATUSES and from_status not in LIVE_STATUSES:
         live = repo.live_round(session, rnd.market_id)
         if live is not None:
-            raise Conflict("ANOTHER_ROUND_LIVE", "Another round in this market is already open or paused.", round_id=live.id)
+            raise Conflict(
+                "ANOTHER_ROUND_LIVE",
+                "Another round in this market is already open or paused.",
+                round_id=live.id,
+            )
     if first_open:
         if not listing_ids:
-            raise Conflict("ROUND_HAS_NO_LISTINGS", "A round needs at least one listing before it can open.")
+            raise Conflict(
+                "ROUND_HAS_NO_LISTINGS", "A round needs at least one listing before it can open."
+            )
         archived = repo.archived_widget_ids(session, rnd.id)
         if archived:
-            raise Conflict("ROUND_HAS_ARCHIVED_WIDGETS", "Remove archived widgets before opening.", widget_ids=archived)
+            raise Conflict(
+                "ROUND_HAS_ARCHIVED_WIDGETS",
+                "Remove archived widgets before opening.",
+                widget_ids=archived,
+            )
 
     values: dict[str, Any] = {"status": target, "version": from_version + 1}
     if first_open:
@@ -189,13 +228,24 @@ def transition(
         result = session.exec(statement)  # type: ignore[call-overload]
     except IntegrityError:
         # Lost a race against another organizer opening a different round.
-        raise Conflict("ANOTHER_ROUND_LIVE", "Another round in this market is already open or paused.") from None
+        raise Conflict(
+            "ANOTHER_ROUND_LIVE", "Another round in this market is already open or paused."
+        ) from None
     if result.rowcount != 1:
-        raise Conflict("ROUND_VERSION_CONFLICT", "The round was changed by someone else; reload and retry.")
+        raise Conflict(
+            "ROUND_VERSION_CONFLICT", "The round was changed by someone else; reload and retry."
+        )
 
-    session.add(MarketRoundEvent(
-        round_id=rnd.id, action=action, from_status=from_status, to_status=target, actor=actor, reason=reason,
-    ))
+    session.add(
+        MarketRoundEvent(
+            round_id=rnd.id,
+            action=action,
+            from_status=from_status,
+            to_status=target,
+            actor=actor,
+            reason=reason,
+        )
+    )
     if first_open:
         pricing.on_round_opened(session, listing_ids, now)
     session.flush()
@@ -205,23 +255,32 @@ def transition(
 
 def round_events(session: Session, round_id: int) -> list[MarketRoundEvent]:
     get_round(session, round_id)
-    return list(session.exec(
-        select(MarketRoundEvent).where(MarketRoundEvent.round_id == round_id).order_by(col(MarketRoundEvent.id)),
-    ))
+    return list(
+        session.exec(
+            select(MarketRoundEvent)
+            .where(MarketRoundEvent.round_id == round_id)
+            .order_by(col(MarketRoundEvent.id)),
+        )
+    )
 
 
 # --- listings (editable only while the round is a draft) ---
 
+
 def _require_draft(rnd: MarketRound) -> None:
     if rnd.status != RoundStatus.DRAFT:
-        raise Conflict("ROUND_NOT_EDITABLE", "Listings can only be changed while the round is a draft.", status=rnd.status)
+        raise Conflict(
+            "ROUND_NOT_EDITABLE",
+            "Listings can only be changed while the round is a draft.",
+            status=rnd.status,
+        )
 
 
 def _supply_columns(supply: Supply) -> tuple[int | None, int | None]:
     if supply == "infinite":
         return None, None
     if supply < 0:
-        raise AppError("INVALID_SUPPLY", "Supply must be zero or more, or \"infinite\".")
+        raise AppError("INVALID_SUPPLY", 'Supply must be zero or more, or "infinite".')
     return supply, supply
 
 
@@ -236,7 +295,9 @@ def _check_widget(session: Session, widget_id: int) -> None:
 def _fresh_listing(session: Session, listing_id: int) -> MarketListing:
     """Re-read a listing after taking a round lock; it may have been deleted meanwhile."""
     listing = session.exec(
-        select(MarketListing).where(MarketListing.id == listing_id).execution_options(populate_existing=True),
+        select(MarketListing)
+        .where(MarketListing.id == listing_id)
+        .execution_options(populate_existing=True),
     ).one_or_none()
     if listing is None:
         raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
@@ -255,17 +316,29 @@ def add_listing(session: Session, round_id: int, spec: ListingSpec) -> MarketLis
     if spec.base_price < 1:
         raise AppError("INVALID_PRICE", "base_price must be at least 1.")
     if repo.listing_for_widget(session, rnd.id, spec.widget_id) is not None:
-        raise Conflict("DUPLICATE_LISTING", "This widget is already listed in the round.", widget_id=spec.widget_id)
+        raise Conflict(
+            "DUPLICATE_LISTING",
+            "This widget is already listed in the round.",
+            widget_id=spec.widget_id,
+        )
     supply_total, stock = _supply_columns(spec.supply)
     listing = MarketListing(
-        round_id=rnd.id, widget_id=spec.widget_id, base_price=spec.base_price,
-        supply_total=supply_total, stock_remaining=stock, max_per_purchase=spec.max_per_purchase,
+        round_id=rnd.id,
+        widget_id=spec.widget_id,
+        base_price=spec.base_price,
+        supply_total=supply_total,
+        stock_remaining=stock,
+        max_per_purchase=spec.max_per_purchase,
     )
     session.add(listing)
     try:
         session.flush()
     except IntegrityError:
-        raise Conflict("DUPLICATE_LISTING", "This widget is already listed in the round.", widget_id=spec.widget_id) from None
+        raise Conflict(
+            "DUPLICATE_LISTING",
+            "This widget is already listed in the round.",
+            widget_id=spec.widget_id,
+        ) from None
     pricing.configure_listing(session, listing, spec.pricing_strategy, spec.pricing_params or {})
     return listing
 
@@ -274,8 +347,14 @@ _UNSET: Any = object()
 
 
 def update_listing(
-    session: Session, listing_id: int, *, base_price: int = _UNSET, supply: Supply = _UNSET,
-    max_per_purchase: int | None = _UNSET, pricing_strategy: str = _UNSET, pricing_params: dict[str, Any] = _UNSET,
+    session: Session,
+    listing_id: int,
+    *,
+    base_price: int = _UNSET,
+    supply: Supply = _UNSET,
+    max_per_purchase: int | None = _UNSET,
+    pricing_strategy: str = _UNSET,
+    pricing_params: dict[str, Any] = _UNSET,
 ) -> MarketListing:
     listing = _lock_draft_listing(session, listing_id)
     if base_price is not _UNSET:
@@ -325,6 +404,7 @@ def listings_for_round(session: Session, round_id: int) -> list[MarketListing]:
 
 # --- internal contract for Transaction (I) and Auction (J) ---
 
+
 @dataclass(frozen=True)
 class TradableListing:
     listing_id: int
@@ -337,7 +417,9 @@ class TradableListing:
     max_per_purchase: int | None
 
 
-def lock_listing_for_trade(session: Session, listing_id: int, *, kind: RoundKind) -> TradableListing:
+def lock_listing_for_trade(
+    session: Session, listing_id: int, *, kind: RoundKind
+) -> TradableListing:
     """Check, inside the caller's transaction, that a listing can be traded
     right now. Holds a shared lock on the round row until the transaction
     ends, so the round cannot be paused/closed under an in-flight trade.
@@ -354,10 +436,18 @@ def lock_listing_for_trade(session: Session, listing_id: int, *, kind: RoundKind
     # snapshot only; take_stock is the authoritative check.
     listing = _fresh_listing(session, listing_id)
     if rnd.kind != kind:
-        raise Conflict("WRONG_ROUND_KIND", f"This listing belongs to a {rnd.kind} round.", kind=rnd.kind)
+        raise Conflict(
+            "WRONG_ROUND_KIND", f"This listing belongs to a {rnd.kind} round.", kind=rnd.kind
+        )
     return TradableListing(
-        listing.id, rnd.id, listing.widget_id, RoundKind(rnd.kind), listing.base_price,
-        listing.infinite_supply, listing.stock_remaining, listing.max_per_purchase,
+        listing.id,
+        rnd.id,
+        listing.widget_id,
+        RoundKind(rnd.kind),
+        listing.base_price,
+        listing.infinite_supply,
+        listing.stock_remaining,
+        listing.max_per_purchase,
     )
 
 
@@ -368,7 +458,8 @@ def take_stock(session: Session, listing_id: int, quantity: int) -> int | None:
         raise AppError("INVALID_QUANTITY", "Quantity must be at least 1.", quantity=quantity)
     if listing.max_per_purchase is not None and quantity > listing.max_per_purchase:
         raise AppError(
-            "QUANTITY_LIMIT_EXCEEDED", "Quantity is above the per-purchase limit.",
+            "QUANTITY_LIMIT_EXCEEDED",
+            "Quantity is above the per-purchase limit.",
             max_per_purchase=listing.max_per_purchase,
         )
     stock = col(MarketListing.stock_remaining)
@@ -392,8 +483,10 @@ def return_stock(session: Session, listing_id: int, quantity: int) -> int | None
         raise AppError("INVALID_QUANTITY", "Quantity must be at least 1.", quantity=quantity)
     stock = col(MarketListing.stock_remaining)
     result = session.exec(  # type: ignore[call-overload]
-        update(MarketListing).where(col(MarketListing.id) == listing_id)
-        .values(stock_remaining=stock + quantity).returning(stock),
+        update(MarketListing)
+        .where(col(MarketListing.id) == listing_id)
+        .values(stock_remaining=stock + quantity)
+        .returning(stock),
     ).one()
     session.expire_all()
     return result[0]

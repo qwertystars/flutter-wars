@@ -30,8 +30,11 @@ class Market(SQLModel, table=True):
     __table_args__ = (
         # At most one active market: GET /market needs no market id.
         sa.Index(
-            "uq_market_single_active", "is_active", unique=True,
-            postgresql_where=sa.text("is_active"), sqlite_where=sa.text("is_active"),
+            "uq_market_single_active",
+            "is_active",
+            unique=True,
+            postgresql_where=sa.text("is_active"),
+            sqlite_where=sa.text("is_active"),
         ),
     )
 
@@ -48,7 +51,9 @@ class MarketRound(SQLModel, table=True):
         # At most one open-or-paused round per market, enforced by the database
         # so two organizers cannot open two rounds at once.
         sa.Index(
-            "uq_market_round_single_live", "market_id", unique=True,
+            "uq_market_round_single_live",
+            "market_id",
+            unique=True,
             postgresql_where=sa.text("status IN ('open', 'paused')"),
             sqlite_where=sa.text("status IN ('open', 'paused')"),
         ),
@@ -79,13 +84,19 @@ class MarketListing(SQLModel, table=True):
     __table_args__ = (
         sa.UniqueConstraint("round_id", "widget_id", name="uq_market_listing_round_widget"),
         sa.CheckConstraint("base_price > 0", name="ck_market_listing_base_price_positive"),
-        sa.CheckConstraint("supply_total IS NULL OR supply_total >= 0", name="ck_market_listing_supply_nonneg"),
-        sa.CheckConstraint("stock_remaining IS NULL OR stock_remaining >= 0", name="ck_market_listing_stock_nonneg"),
         sa.CheckConstraint(
-            "(supply_total IS NULL) = (stock_remaining IS NULL)", name="ck_market_listing_infinite_consistent",
+            "supply_total IS NULL OR supply_total >= 0", name="ck_market_listing_supply_nonneg"
         ),
         sa.CheckConstraint(
-            "max_per_purchase IS NULL OR max_per_purchase > 0", name="ck_market_listing_max_per_purchase",
+            "stock_remaining IS NULL OR stock_remaining >= 0", name="ck_market_listing_stock_nonneg"
+        ),
+        sa.CheckConstraint(
+            "(supply_total IS NULL) = (stock_remaining IS NULL)",
+            name="ck_market_listing_infinite_consistent",
+        ),
+        sa.CheckConstraint(
+            "max_per_purchase IS NULL OR max_per_purchase > 0",
+            name="ck_market_listing_max_per_purchase",
         ),
     )
 

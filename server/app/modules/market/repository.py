@@ -9,14 +9,20 @@ def active_market(session: Session) -> Market | None:
 
 
 def rounds(session: Session, market_id: int) -> list[MarketRound]:
-    return list(session.exec(
-        select(MarketRound).where(MarketRound.market_id == market_id).order_by(col(MarketRound.sequence)),
-    ))
+    return list(
+        session.exec(
+            select(MarketRound)
+            .where(MarketRound.market_id == market_id)
+            .order_by(col(MarketRound.sequence)),
+        )
+    )
 
 
 def live_round(session: Session, market_id: int) -> MarketRound | None:
     return session.exec(
-        select(MarketRound).where(MarketRound.market_id == market_id, col(MarketRound.status).in_(LIVE_STATUSES)),
+        select(MarketRound).where(
+            MarketRound.market_id == market_id, col(MarketRound.status).in_(LIVE_STATUSES)
+        ),
     ).one_or_none()
 
 
@@ -30,30 +36,42 @@ def latest_started_round(session: Session, market_id: int) -> MarketRound | None
 
 
 def listings(session: Session, round_id: int) -> list[MarketListing]:
-    return list(session.exec(
-        select(MarketListing).where(MarketListing.round_id == round_id).order_by(col(MarketListing.id)),
-    ))
+    return list(
+        session.exec(
+            select(MarketListing)
+            .where(MarketListing.round_id == round_id)
+            .order_by(col(MarketListing.id)),
+        )
+    )
 
 
 def listing_ids(session: Session, round_id: int) -> list[int]:
-    return list(session.exec(
-        select(MarketListing.id).where(MarketListing.round_id == round_id).order_by(col(MarketListing.id)),
-    ))
+    return list(
+        session.exec(
+            select(MarketListing.id)
+            .where(MarketListing.round_id == round_id)
+            .order_by(col(MarketListing.id)),
+        )
+    )
 
 
 def listing_for_widget(session: Session, round_id: int, widget_id: int) -> MarketListing | None:
     return session.exec(
-        select(MarketListing).where(MarketListing.round_id == round_id, MarketListing.widget_id == widget_id),
+        select(MarketListing).where(
+            MarketListing.round_id == round_id, MarketListing.widget_id == widget_id
+        ),
     ).one_or_none()
 
 
 def archived_widget_ids(session: Session, round_id: int) -> list[int]:
-    return list(session.exec(
-        select(Widget.id)
-        .join(MarketListing, col(MarketListing.widget_id) == Widget.id)
-        .where(MarketListing.round_id == round_id, col(Widget.archived).is_(True))
-        .order_by(col(Widget.id)),
-    ))
+    return list(
+        session.exec(
+            select(Widget.id)
+            .join(MarketListing, col(MarketListing.widget_id) == Widget.id)
+            .where(MarketListing.round_id == round_id, col(Widget.archived).is_(True))
+            .order_by(col(Widget.id)),
+        )
+    )
 
 
 def widget_names(session: Session, widget_ids: list[int]) -> dict[int, str]:

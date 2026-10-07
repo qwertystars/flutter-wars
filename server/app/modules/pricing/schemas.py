@@ -9,7 +9,9 @@ class PriceQuoteOut(BaseModel):
     price: int
     strategy: str
     interval_index: int
-    valid_until: datetime | None = Field(description="Earliest time the price may change; null if no change is scheduled.")
+    valid_until: datetime | None = Field(
+        description="Earliest time the price may change; null if no change is scheduled."
+    )
     server_time: datetime
 
 

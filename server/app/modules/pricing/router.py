@@ -9,23 +9,37 @@ from app.core.db import get_session
 from app.modules.market import service as market
 from app.modules.pricing import service
 from app.modules.pricing.models import ListingPricing, PriceHistory
-from app.modules.pricing.schemas import PriceHistoryOut, PriceQuoteOut, PricingConfigOut, PricingUpdate, StrategyOut
+from app.modules.pricing.schemas import (
+    PriceHistoryOut,
+    PriceQuoteOut,
+    PricingConfigOut,
+    PricingUpdate,
+    StrategyOut,
+)
 from app.modules.pricing.strategies import available_strategies, get_strategy
 
 router = APIRouter(tags=["pricing"])
-admin = APIRouter(prefix="/admin/market", tags=["pricing admin"], dependencies=[Depends(require_organizer)])
+admin = APIRouter(
+    prefix="/admin/market", tags=["pricing admin"], dependencies=[Depends(require_organizer)]
+)
 
 
 @router.get("/market/listings/{listing_id}/price", response_model=PriceQuoteOut)
 def listing_price(
-    listing_id: int, session: Session = Depends(get_session), now: datetime = Depends(get_now),
+    listing_id: int,
+    session: Session = Depends(get_session),
+    now: datetime = Depends(get_now),
     _: Principal = Depends(get_principal),
 ) -> PriceQuoteOut:
     market.get_visible_listing(session, listing_id)
     q = service.quote(session, listing_id, now)
     return PriceQuoteOut(
-        listing_id=q.listing_id, price=q.price, strategy=q.strategy, interval_index=q.interval_index,
-        valid_until=q.valid_until, server_time=now,
+        listing_id=q.listing_id,
+        price=q.price,
+        strategy=q.strategy,
+        interval_index=q.interval_index,
+        valid_until=q.valid_until,
+        server_time=now,
     )
 
 
@@ -39,8 +53,12 @@ def strategies() -> list[StrategyOut]:
 
 def _config_out(state: ListingPricing) -> PricingConfigOut:
     return PricingConfigOut(
-        listing_id=state.listing_id, strategy=state.strategy, params=state.params,
-        params_version=state.params_version, current_price=state.current_price, interval_index=state.interval_index,
+        listing_id=state.listing_id,
+        strategy=state.strategy,
+        params=state.params,
+        params_version=state.params_version,
+        current_price=state.current_price,
+        interval_index=state.interval_index,
     )
 
 
@@ -51,9 +69,14 @@ def get_pricing(listing_id: int, session: Session = Depends(get_session)) -> Pri
 
 @admin.patch("/listings/{listing_id}/pricing", response_model=PricingConfigOut)
 def update_pricing(
-    listing_id: int, body: PricingUpdate, session: Session = Depends(get_session), now: datetime = Depends(get_now),
+    listing_id: int,
+    body: PricingUpdate,
+    session: Session = Depends(get_session),
+    now: datetime = Depends(get_now),
 ) -> PricingConfigOut:
-    state = service.update_pricing(session, listing_id, strategy=body.strategy, params=body.params, now=now)
+    state = service.update_pricing(
+        session, listing_id, strategy=body.strategy, params=body.params, now=now
+    )
     session.commit()
     session.refresh(state)
     return _config_out(state)

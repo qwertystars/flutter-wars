@@ -4,4 +4,12 @@ from app.modules.catalog.models import Widget
 from app.modules.market.models import Market, MarketListing, MarketRound, MarketRoundEvent
 from app.modules.pricing.models import ListingPricing, PriceHistory
 
-__all__ = ["ListingPricing", "Market", "MarketListing", "MarketRound", "MarketRoundEvent", "PriceHistory", "Widget"]
+__all__ = [
+    "ListingPricing",
+    "Market",
+    "MarketListing",
+    "MarketRound",
+    "MarketRoundEvent",
+    "PriceHistory",
+    "Widget",
+]

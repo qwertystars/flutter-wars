@@ -30,7 +30,9 @@ class ListingPricing(SQLModel, table=True):
     __tablename__ = "listing_pricing"
     __table_args__ = (
         sa.CheckConstraint("current_price > 0", name="ck_listing_pricing_price_positive"),
-        sa.CheckConstraint("interval_bought >= 0 AND interval_sold >= 0", name="ck_listing_pricing_counts"),
+        sa.CheckConstraint(
+            "interval_bought >= 0 AND interval_sold >= 0", name="ck_listing_pricing_counts"
+        ),
     )
 
     listing_id: int = Field(primary_key=True, foreign_key="market_listing.id")
