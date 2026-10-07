@@ -12,13 +12,13 @@ destructive migrations. Prefer read-only operations and existing versions.
 
 - [ ] Verify production deployment is live and the intended version is serving.
 - [ ] `GET /health` returns 200.
-- [ ] `GET /ready` returns 200 (`database ok:true`, `source:"hyperdrive"`).
+- [ ] `GET /ready` returns 200 (`{"status":"ready"}`).
 - [ ] Database connectivity confirmed from the edge (the `/ready` check above).
-- [ ] Migration version verified: `alembic current` shows the expected head.
+- [ ] Migration version verified: `alembic current` shows the expected head (`0004` today).
 - [ ] Secrets configured (Cloudflare token, DB URL for migrations; none needed at runtime).
-- [ ] Hyperdrive binding id matches the account config.
+- [ ] Hyperdrive binding id matches `cloudflare/wrangler.jsonc`; primary caching is disabled.
 - [ ] A known-good previous Worker version exists for rollback
-      (`npx wrangler versions list --env production`).
+      (`cd cloudflare && npx wrangler versions list`).
 - [ ] Recovery posture known: Neon history window set; PITR available for the event
       window (see [recovery.md](recovery.md)).
 
@@ -27,12 +27,13 @@ destructive migrations. Prefer read-only operations and existing versions.
 - [ ] Avoid unnecessary production deployments.
 - [ ] No destructive migrations; only backward-compatible changes if unavoidable.
 - [ ] Emergency-only changes; use `wrangler rollback` for application regressions.
-- [ ] Monitor `/ready`; a DB blip shows as 503 with an `error_type` (no secrets leak).
+- [ ] Monitor `/ready`; a DB query failure shows as 503 with `{"status":"unavailable"}`.
+      Check logs for configuration/session failures (which may return 500).
 - [ ] Remember: a Worker rollback does not undo database changes.
 
 ## AFTER the event
 
-- [ ] Inspect errors (`npx wrangler tail`, Cloudflare dashboard metrics).
+- [ ] Inspect errors (`cd cloudflare && npx wrangler tail`, Cloudflare dashboard metrics).
 - [ ] Inspect database state (row counts, key invariants owned by the feature modules).
 - [ ] Preserve required audit/recovery information; capture the migration version.
 - [ ] If data integrity is in question, plan a Neon PITR restore window before making
@@ -40,7 +41,8 @@ destructive migrations. Prefer read-only operations and existing versions.
 
 ## Capacity note
 
-Local synthetic results (Phase 3) are a baseline, not a provisioning claim:
+Historical local synthetic results (Phase 3) are a baseline, not a provisioning
+claim. The current app does not expose the old `/db/roundtrip` harness endpoint:
 
 | Endpoint | Concurrency | Success |
 | --- | --- | --- |

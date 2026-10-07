@@ -7,23 +7,27 @@
 | `GET /health` | The application process is alive. | No |
 | `GET /ready` | The application can use required dependencies (DB reachable). | Yes (`SELECT 1`) |
 
-`/ready` returns 200 with a dependency list when healthy, 503 when not. The payload
-never contains credentials, SQL, stack traces or connection strings — only
-`status`, and per dependency `name`, `ok`, `latency_ms`, `source`, `error_type`.
+`app/main.py` owns both endpoints. `/ready` returns 200 with
+`{"status":"ready"}` after a successful DB query, or 503 with
+`{"status":"unavailable"}` when that query fails. It does not expose dependency
+names, source, latency, or error types. Configuration/connection failures while
+creating the session may fail before the query handler and return 500.
 
 ## Reading a failing `/ready`
 
-Example:
+Example query failure:
 ```json
-{"status":"not_ready","dependencies":[{"name":"database","ok":false,"source":"hyperdrive","error_type":"OperationalError"}]}
+{"status":"unavailable"}
 ```
 
-| `source` | `error_type` | Likely cause | Action |
-| --- | --- | --- | --- |
-| `hyperdrive` | `OperationalError` / timeout | Neon unavailable, or Hyperdrive binding/connection misconfigured | Check Neon status; verify the binding id (`npx wrangler hyperdrive list`) matches `wrangler.jsonc` |
-| `settings` | `ConfigError` | No `HYPERDRIVE` binding **and** no `DATABASE_URL` | Local: set `DATABASE_URL`; Worker: ensure the binding exists for the env |
-| `settings` | `OperationalError` | `DATABASE_URL` wrong/unreachable (local dev) | Verify host/credentials; check `sslmode` |
-| any | cold start | First request after idle is slower | Expected; retry |
+| Context | Likely cause | Action |
+| --- | --- | --- |
+| Worker | Neon unavailable, or Hyperdrive binding/connection misconfigured | Check Neon status; verify the binding id (`npx wrangler hyperdrive list` from `cloudflare/`) matches `cloudflare/wrangler.jsonc` |
+| Local app | Missing or wrong/unreachable `DATABASE_URL` | Verify environment, host/credentials, and `sslmode` without printing secrets |
+| First request after idle | Cold start | Retry; inspect logs if failures persist |
+
+The richer diagnostic payload belongs to `app/infra/health.py` helper tests;
+it is not wired into the current HTTP endpoint.
 
 ## Common failures
 
@@ -33,14 +37,14 @@ request; do not put heavy initialization in lifespan). Check `wrangler deploy`
 startup output.
 
 **Worker bundle too large.** Guardrails (project): <45 MiB comfortable, 45–52 MiB
-review, >52 MiB stop. Inspect `du -sh python_modules/*`.
+review, >52 MiB stop. Inspect `du -sh python_modules/*` from `cloudflare/` after bundling.
 
 **Local `pywrangler dev`: "Network connection lost" / "Error inside ProxyWorker".**
 Miniflare's local dev proxy under heavy bursts; not a production behavior. Do not
 add DDL per request (the harness table is created by `scripts/dev_setup.py`).
 
-**Migration fails during apply.** Each revision runs in a transaction (Postgres
-transactional DDL), so it rolls back and the DB stays at the previous revision. Run
+**Migration fails during apply.** Alembic uses Postgres transactional DDL; a failed
+upgrade rolls back its transaction. Confirm the actual revision with
 `uv run alembic current` and `uv run alembic history`. Fix forward with a corrective
 revision; do not hand-edit the schema or `alembic_version`.
 
@@ -49,12 +53,13 @@ and DB — e.g., a table created outside migrations. The dev harness `infra_prob
 table is excluded; any other extra table is a real drift signal. Do not suppress it.
 
 **Application errors but `/ready` is green.** Readiness only covers DB
-connectivity; check Worker logs (`npx wrangler tail --env production`).
+connectivity; check Worker logs (`npx wrangler tail`).
 
 ## Logs and diagnostics
 
-- `npx wrangler tail --env <env>` — live Worker logs (Observability is enabled).
+- `npx wrangler tail` — live Worker logs (Observability is enabled).
 - `uv run alembic current` / `history` — schema state.
 - `scripts/verify_deployment.sh <base-url>` — post-deploy smoke.
 
-Never print secrets; readiness/log payloads are already redacted.
+Run Wrangler commands from `cloudflare/` (the only config location).
+Never print secrets; `/ready` exposes only status, and infra diagnostics redact credentials.

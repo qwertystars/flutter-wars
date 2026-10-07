@@ -38,12 +38,14 @@ provider operation; the ≤30 minute target is achievable but not guaranteed.
 Cloudflare Workers support versioned deployments and rollback:
 
 ```
-npx wrangler versions list --env production
-npx wrangler rollback --env production                 # roll back to previous version
-npx wrangler versions deploy <version-id> --env production   # deploy a specific version
+cd cloudflare
+npx wrangler versions list
+npx wrangler rollback                 # roll back to previous version
+npx wrangler versions deploy <version-id>   # deploy a specific version
 ```
 
-Verify after rollback: `scripts/verify_deployment.sh <base-url>`.
+Return to `server/` after the Wrangler commands, then verify rollback:
+`scripts/verify_deployment.sh <base-url>`.
 
 > **A Worker rollback does NOT undo database schema or data changes.** Rolling back
 > the application version leaves the database exactly as it is. This is why
@@ -51,7 +53,7 @@ Verify after rollback: `scripts/verify_deployment.sh <base-url>`.
 
 ## Why backward-compatible migrations matter
 
-The deployment order is *deploy app → apply migration* (see
+The deployment order is *apply migrations → deploy Worker → verify* (see
 [deployment.md](deployment.md)). Because both the previous and the new application
 version may run against the post-migration schema:
 
@@ -80,15 +82,17 @@ Rules:
 
 ## Hyperdrive failure
 
-- Symptom: `/ready` `ok:false`, `source:"hyperdrive"`, `error_type` present.
-- Check the binding id in `wrangler.jsonc` matches the account's Hyperdrive config
+- Symptom: `/ready` returns 503 with `{"status":"unavailable"}` on DB query failure.
+  Session/configuration failures may return 500; inspect Worker logs securely.
+- Check the binding id in `cloudflare/wrangler.jsonc` matches the account's Hyperdrive config
   (`npx wrangler hyperdrive list`), and that the underlying Neon database is up.
 - Recover by correcting the binding/config and redeploying; Hyperdrive re-establishes
   pooled connections automatically. Local dev is unaffected (it uses `DATABASE_URL`).
 
 ## Neon unavailable
 
-- `/ready` returns 503 with `source` and an `error_type` (never a connection string).
+- `/ready` returns 503 with `{"status":"unavailable"}` on query failure
+  (no source, error type, or connection string).
 - The Worker stays up; `/health` still returns 200. Traffic requiring the DB fails
   gracefully.
 - Recover when Neon is reachable again; no redeploy needed. If the outage requires

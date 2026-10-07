@@ -8,30 +8,31 @@ CI/CD lives in `.github/workflows/`.
 
 | File | Responsibility | Owner |
 | --- | --- | --- |
-| `src/settings.py` | Environment separation + DB configuration record and validation | Module M (Foundation consumes it) |
-| `src/db.py` | Target resolution, engine/session factory, connectivity check | Module M |
-| `src/health.py` | Readiness probe hook + dependency status model | Module M (Foundation owns the endpoint) |
-| `src/app.py` | Minimal FastAPI seam app for verification | Foundation will replace/own |
-| `src/worker.py` | Cloudflare ASGI entrypoint (`workers.asgi.entrypoint`) | Module M (deployment config) |
-| `src/infra_probe.py` | Infra-only probe table for lifecycle tests — **not** a business entity | Module M (temporary) |
+| `app/infra/settings.py` | Environment separation + DB configuration record and validation | Module M (Foundation consumes it) |
+| `app/infra/db.py` | Target resolution, engine/session factory, connectivity check | Module M |
+| `app/infra/health.py` | Readiness probe hook + dependency status model | Module M (Foundation owns the endpoint) |
+| `app/main.py` | FastAPI `create_app`; owns `/health` and `/ready` | Foundation |
+| `cloudflare/src/worker.py` | Cloudflare ASGI entrypoint (`workers.asgi.entrypoint`) | Module M (deployment config) |
+| `app/infra/infra_probe.py` | Infra-only probe table for lifecycle tests — **not** a business entity | Module M (temporary) |
 
 ## 2. Connection paths
 
 ```
 LOCAL DEV (uvicorn)                          PRODUCTION (Cloudflare Worker)
   FastAPI                                      FastAPI (Pyodide, sync)
-    -> resolve_target()                          -> resolve_target()
+    -> app.core.db.get_engine()                  -> target_from_hyperdrive()
     -> DATABASE_URL (settings source)            -> env.HYPERDRIVE binding
-    -> psycopg -> Neon (direct, TLS)             -> psycopg -> Hyperdrive -> Neon
+    -> psycopg -> Neon (direct, TLS)             -> pg8000 -> Hyperdrive -> Neon
 ```
 
-- Local and production use the **same sync SQLModel/SQLAlchemy + psycopg code path**.
-- The only differences are the target source and `sslmode` (Hyperdrive hop is plain,
-  direct Neon requires TLS).
+- Local and production use synchronous SQLModel/SQLAlchemy. Local tooling uses
+  psycopg; the Worker uses pg8000 (pure Python).
+- The Worker converts the Hyperdrive target URL to `postgresql+pg8000` and removes
+  `sslmode`; direct Neon connections from local tooling require TLS.
 
 ## 3. Module A / Module M seam
 
-Module M provides, and Foundation consumes:
+Module M provides these infrastructure hooks:
 
 - `db.resolve_target(scope_env, settings) -> DatabaseTarget`
 - `db.engine_for(target, settings)` and `db.create_db_engine(target, settings)`
@@ -41,20 +42,23 @@ Module M provides, and Foundation consumes:
 - `health.readiness(scope_env, settings) -> (is_ready, payload)`
 
 Module M **does not** define `get_db()`, the FastAPI bootstrap, or the `/health`
-and `/ready` routers. Foundation composes these hooks into `get_db()` and its
-readiness endpoint.
+and `/ready` routers. Foundation owns application composition. The current app
+uses `app.core.db.get_session` and
+`SELECT 1` directly for `/ready`, rather than the richer infra readiness hook.
 
 ## 4. Connection lifecycle
 
-- One `Engine` per request, with `NullPool` — Hyperdrive owns pooling, and the
-  Worker must not hold TCP sockets between requests.
-- One `Session` per unit of work via `session_scope`: commit on success, rollback
-  on error, always close.
+- The Worker configures and reuses an `Engine` with `NullPool` — Hyperdrive owns
+  pooling, and no TCP connections are retained between requests. The infra helper
+  `engine_for` separately creates/disposes an engine per context.
+- Foundation supplies one `Session` per request; mutations own their transaction.
+  The infra `session_scope` helper commits on success, rolls back on error, and closes.
 - No shared mutable session/connection state across requests.
 
 ## 5. Driver decision
 
-- Driver: **psycopg (sync)** — present in Pyodide and verified with Hyperdrive.
+- Worker driver: **pg8000 (sync)**. psycopg cannot load in Pyodide (no libpq),
+  verified on Cloudflare. Local dev, tests, and migrations use **psycopg**.
 - ORM: **synchronous** SQLModel/SQLAlchemy. Async SQLAlchemy is unsupported in
   Python Workers (no greenlet), so async SQLModel/asyncpg are not used for the ORM.
 
@@ -62,7 +66,8 @@ readiness endpoint.
 
 - Binding name: `HYPERDRIVE` (`settings.HYPERDRIVE_BINDING`).
 - The binding exposes `host/port/user/password/database` (no connection string).
-- Worker -> Hyperdrive hop is not TLS: the generated URL uses `sslmode=disable`.
+- Worker -> Hyperdrive hop is not TLS: the infra helper generates `sslmode=disable`,
+  then the Worker removes that query option for pg8000.
 - Hyperdrive pools in **transaction mode**: keep transactions short; do not wrap
   long multi-statement units of work in a single transaction.
 - Hyperdrive caches read queries (`max_age`, default 60s) and does **not**
@@ -77,8 +82,8 @@ readiness endpoint.
 
 - Local/dev/test connect directly to Neon with TLS (`sslmode=require` in the URL).
 - Use Neon **branches** for dev/test/staging isolation; production is a separate
-  branch/project. The staging Worker uses a separate Hyperdrive id + Neon branch
-  (ids are placeholders until account access is available).
+  branch/project. A future staging Worker would need its own Hyperdrive id + Neon
+  branch; no staging Worker or Wrangler environment exists today.
 - Neon's pooled endpoint (`...-pooler...`) is optional for local tooling; the
   Worker path goes through Hyperdrive instead.
 - No Neon-specific code in the app — only the connection target differs.
@@ -88,9 +93,9 @@ readiness endpoint.
 | Env | Target source | `DATABASE_URL` | Secrets location |
 | --- | --- | --- | --- |
 | development | settings | required (dev Neon branch) | local `.env` (gitignored) |
-| test | settings | required (test DB/branch) | CI secret / `.env` |
-| staging | Hyperdrive binding | not used in the Worker | CI secret for migrations |
-| production | Hyperdrive binding | not used in the Worker | `wrangler secret put` / CI secret |
+| test | test fixtures | fixtures use `TEST_DATABASE_URL`; migration tests use `MIGRATION_DATABASE_URL` | process environment / CI disposable DBs |
+| staging (future) | separate Hyperdrive binding would be needed | not used in a Worker | migration secret would be needed |
+| production | Hyperdrive binding | not used in the Worker | Hyperdrive config; CI secret for migrations |
 
 Env vars: `APP_ENV`, `DATABASE_URL`, `DB_CONNECT_TIMEOUT_SECONDS`,
 `DB_APPLICATION_NAME`. See `.env.example` / `.dev.vars.example`.
@@ -121,16 +126,19 @@ it may not represent other workloads or future runtime versions.
 - `check_connectivity` / `check_database` never return exception messages, SQL,
   connection strings, or credentials — only `error_type` names.
 - Configuration failures surface as `ConfigError` (readiness fails closed).
-- Connect timeouts are bounded by `DB_CONNECT_TIMEOUT_SECONDS`.
-- The `/ready` payload contains only: status, dependency name, ok, latency_ms,
-  source, error_type.
+- `DB_CONNECT_TIMEOUT_SECONDS` bounds connections made by the psycopg infra helper;
+  the current Worker does not apply these libpq options to pg8000.
+- Infra readiness hooks expose dependency diagnostics. The actual `/ready` endpoint
+  returns only `{"status":"ready"}` (200) or `{"status":"unavailable"}` (503)
+  when its DB query fails; it does not expose those diagnostics. Session or
+  configuration failures before the query handler may return 500.
 
 ## 11. Worker limits (recorded baseline)
 
-- Bundle (dry-run): **34244 KiB uncompressed / 7661 KiB gzip** (Phase 1: 34243 KiB).
+- Historical spike bundle (dry-run): **34244 KiB uncompressed / 7661 KiB gzip**.
+  This included psycopg binary dependencies and is not the current pg8000 bundle.
+  Re-measure with `cd cloudflare && ./build.sh && uv run pywrangler deploy --dry-run`.
   Guardrails (project): <45 MiB comfortable, 45–52 MiB review, >52 MiB stop.
-- Largest dependencies: `psycopg_binary` 16 MiB, `sqlalchemy` 8.7 MiB,
-  `pydantic_core` 4.3 MiB.
 - Worker startup limit is 1 s; monitor on each deploy.
 
 ## 12. Resolved: dev-probe DDL under load
@@ -139,9 +147,10 @@ The `/db/roundtrip` dev probe originally ran `create_all` per request; under a
 c=50 burst the local `wrangler dev` (Miniflare) proxy dropped connections
 (`Error inside ProxyWorker ... Network connection lost`), while `/ready` stayed
 stable to c=100. Fix (dev harness only, no production change): the harness table
-is now created once via `scripts/dev_setup.py` / test fixtures, and
-`/db/roundtrip` performs only transaction + INSERT/SELECT. After the fix, a
-c=50/100 regression showed zero failures on both endpoints.
+was created once via `scripts/dev_setup.py` / test fixtures, and
+`/db/roundtrip` performed only transaction + INSERT/SELECT. After the fix, a
+c=50/100 regression showed zero failures on both endpoints. These are historical
+harness results; `app/main.py` does not expose `/db/roundtrip` today.
 
 ## 13. Deploy-time policy decisions
 
@@ -156,11 +165,13 @@ Resolved (not TBD):
 
 ## 14. Known open items
 
-- Staging environment wiring (config shape exists; Hyperdrive/Neon ids pending).
-- Real Cloudflare/Neon deployment verification (no credentials yet).
+- Staging environment wiring is a future option; no Wrangler staging/production
+  environment blocks exist. The configured Worker is `flutter-wars-api`.
+- Driver choice has been verified on Cloudflare; verify health/readiness and the
+  primary Hyperdrive cache-disabled setting for each deployment.
 
 ## 15. Related docs
 
 - Migrations: `docs/migrations.md` (shared Alembic workflow; how modules contribute).
-- Deployment: `wrangler.jsonc` (dev/staging/production envs), `scripts/migrate.sh`,
+- Deployment: `cloudflare/wrangler.jsonc` (single production Worker), `scripts/deploy.sh`, `scripts/migrate.sh`,
   `scripts/verify_deployment.sh`.

@@ -9,8 +9,9 @@ contribute them to this one shared, ordered history.
 Chosen because it is SQLAlchemy-native (SQLModel is built on SQLAlchemy), supports
 versioned/ordered/reviewable revisions, offline SQL generation, and drift
 detection (`alembic check`). It uses the same sync SQLModel/SQLAlchemy + psycopg
-stack as the app. Alembic is a **dev-only** dependency — it is never bundled into
-the Worker.
+stack as local tooling. The Worker uses pg8000. Alembic is installed in the
+server project, but is absent from `cloudflare/pyproject.toml` and never bundled
+into the Worker.
 
 ## Layout
 
@@ -19,10 +20,13 @@ server/
   alembic.ini                       # script_location only; URL comes from env.py
   migrations/
     env.py                          # shared environment (DATABASE_URL, metadata, exclusions)
-    metadata_registry.py            # feature modules register their models here
     script.py.mako                  # revision template
     versions/
-      0001_infrastructure_baseline.py   # empty baseline (no business tables)
+      0001_catalog_widget_placeholder.py  # D placeholder widget table
+      0002_market_and_pricing.py           # G/H tables
+      0003_market_auction_lot.py           # G auction lots
+      0004_modules_i_j.py                 # I/J SQL payload
+  app/models.py                     # imports all module table models
 ```
 
 ## Commands
@@ -44,16 +48,9 @@ Run from `server/` with `DATABASE_URL` set:
 
 ## How future modules add migrations
 
-1. Create your SQLModel entities in your module, e.g. `src/app/modules/<module>/models.py`.
-2. Register the module once in `migrations/metadata_registry.py`:
-
-   ```python
-   FEATURE_MODEL_MODULES = (
-       "app.modules.catalog.models",  # Module D
-   )
-   ```
-
-   Module M never imports business code directly — this registry is the only seam.
+1. Create your SQLModel entities in your module, e.g. `app/modules/<module>/models.py`.
+2. Import the new table models in `app/models.py`. `migrations/env.py` imports
+   `app.models` to populate `SQLModel.metadata`; there is no separate registry.
 3. Generate the revision: `uv run alembic revision --autogenerate -m "<module>: <change>"`.
 4. **Review the generated file** (autogenerate is a draft, not authority): confirm
    tables/columns/indexes, check ordering, and add explicit `downgrade()` logic.
@@ -73,7 +70,7 @@ export DATABASE_URL="postgresql+psycopg://USER:PASSWORD@HOST:5432/DB?sslmode=req
 uv run alembic upgrade head
 ```
 
-## Production / staging execution
+## Production execution (staging is a future option)
 
 Migrations run **outside** the Worker and connect to Neon **directly** (not through
 Hyperdrive), using a `DATABASE_URL` secret provided by the deploy environment:
@@ -83,23 +80,23 @@ DATABASE_URL=... scripts/migrate.sh      # uv run alembic upgrade head
 ```
 
 Deployment ordering (the authoritative flow is in [deployment.md](deployment.md)):
-`validate -> deploy the compatible app -> apply migrations`. Because the migration
-is applied **after** the deploy, it must remain compatible with the previously
-deployed app:
-1. Expand first — add nullable columns / new tables / new indexes so the currently
-   running app is unaffected.
+`CI green -> apply migrations -> deploy Worker -> verify`. Because migrations
+run **before** deployment, they must remain compatible with the currently
+running app:
+1. Expand first — add nullable columns / new tables / new indexes.
 2. Backfill and switch reads/writes across releases.
 3. Contract (drop/rename/constrain) only later, once no running version uses the old shape.
-4. If the new app genuinely cannot run against the old schema, migrate **before**
-   deploy instead — still keeping the migration compatible with the currently
-   deployed version.
-Run `alembic check` before deploy to catch drift.
+CI runs `alembic check` on a disposable database after upgrading to head.
+
+Migration tests (`tests/test_migrations.py`) use `MIGRATION_DATABASE_URL` pointing
+at a disposable `*_migration_test` database. PostgreSQL module/infra tests use
+`TEST_DATABASE_URL` (`*_modules_test`), not the application's `DATABASE_URL`.
 
 ## Recovery
 
-**Migration fails during apply:** Alembic runs each revision in a transaction
-(Postgres transactional DDL), so a failed revision rolls back and the DB stays at
-the previous revision. Deployment must stop on non-zero exit (do not proceed to
+**Migration fails during apply:** Alembic uses transactional DDL on
+Postgres. A failed upgrade rolls back its transaction; inspect the current
+revision rather than assuming earlier revisions in that upgrade committed. Deployment must stop on non-zero exit (do not proceed to
 app deploy). Inspect state with `uv run alembic current` and `uv run alembic history`.
 
 **Choose rollback vs forward-fix:**
