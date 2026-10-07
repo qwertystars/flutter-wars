@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
@@ -35,7 +36,7 @@ class ListingPricing(SQLModel, table=True):
         ),
     )
 
-    listing_id: int = Field(primary_key=True, foreign_key="market_listing.id")
+    listing_id: UUID = Field(primary_key=True, foreign_key="market_listing.id")
     strategy: str = Field(max_length=40)
     params: dict[str, Any] = Field(default_factory=dict, sa_type=_JSON)
     params_version: int = 1
@@ -53,7 +54,7 @@ class PriceHistory(SQLModel, table=True):
     __tablename__ = "price_history"
 
     id: int | None = Field(default=None, primary_key=True)
-    listing_id: int = Field(foreign_key="market_listing.id", index=True)
+    listing_id: UUID = Field(foreign_key="market_listing.id", index=True)
     interval_index: int
     price: int = Field(sa_type=sa.BigInteger)
     previous_price: int | None = Field(default=None, sa_type=sa.BigInteger)

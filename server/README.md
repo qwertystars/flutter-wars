@@ -6,14 +6,15 @@ Python + FastAPI + SQLModel on Neon PostgreSQL (through Cloudflare Hyperdrive), 
 
 | Path | Module | Status |
 |---|---|---|
-| `app/modules/market/` | G: Market & Round Lifecycle | Implemented. See [docs/market.md](docs/market.md). |
-| `app/modules/pricing/` | H: Pricing Engine | Implemented. See [docs/pricing.md](docs/pricing.md). |
-| `app/trading/` | I: Purchase/Trade Engine | Implemented against owner ports. See [Trading and Auction modules](#trading-and-auction-modules-i-j) and [docs/INTEGRATION.md](docs/INTEGRATION.md). |
+| `app/modules/market/` | G: Market & Round Lifecycle | Implemented, incl. auction lots and the `MarketPort` adapter for I/J. See [docs/market.md](docs/market.md). |
+| `app/modules/pricing/` | H: Pricing Engine | Implemented, incl. the `PricingPort` adapter for I/J. See [docs/pricing.md](docs/pricing.md). |
+| `app/trading/` | I: Purchase/Trade Engine | Implemented against owner ports; runs on the real G/H adapters (`tests/test_gh_ij_integration.py`), Ledger/Inventory/Catalog are still test stand-ins. See [Trading and Auction modules](#trading-and-auction-modules-i-j) and [docs/INTEGRATION.md](docs/INTEGRATION.md). |
 | `app/auction/` | J: Auction | Implemented against owner ports. Same docs as I. |
 | `app/integration/` | I/J composition | `BackendModules` runtime plus the `MarketPort`/`PricingPort`/`LedgerPort`/`InventoryPort`/`CatalogPort` contracts other owners implement. |
-| `app/core/` | A: Foundation, plus the B/K principal | **Placeholder.** Gives `get_session`, `get_principal`, `require_organizer`, `AppError` and `get_now` to G/H. `get_principal` rejects every request until Module B replaces it. |
+| `app/core/` | A: Foundation, plus the B/K principal | **Placeholder.** One `get_session`, `get_principal`, `AppError` shape and `get_now` for every module (I/J's principal and errors derive from these), plus `/health` and `/ready`. `get_principal` rejects every request until Module B replaces it. |
 | `app/modules/catalog/` | D: Widget Catalog | **Placeholder.** A minimal `widget` table plus `get_widget()`. |
-| `migrations/` | M: Infrastructure | **Provisional** Alembic setup. `0001` is the placeholder widget table (D replaces it); `0002` creates the G/H tables. I/J ship raw SQL in `migrations/0001_modules_i_j.sql`, not yet an Alembic revision. |
+| `migrations/` | M: Infrastructure | One Alembic chain: `0001` placeholder widget table (D replaces it), `0002` G/H tables, `0003` G auction lots, `0004` I/J tables (runs the reviewed `migrations/0001_modules_i_j.sql`). CI checks it matches the models and rolls back. |
+| `cloudflare/` | M: Infrastructure | Cloudflare Python Worker packaging (Hyperdrive → Neon). See [Deploy](#deploy-cloudflare). |
 
 Each module follows the same layout: `models.py` (SQLModel tables), `schemas.py` (API payloads), `service.py` (business rules and the internal contracts for other modules), `router.py` (thin FastAPI routes), plus `repository.py` in market for queries. Modules register in `app/main.py:MODULES`.
 
@@ -32,11 +33,46 @@ DATABASE_URL=... uv run fastapi dev app/main.py
 Row locking and the partial unique indexes can only be proven on Postgres. The concurrency suite (`tests/test_postgres_concurrency.py`) runs only when `TEST_DATABASE_URL` points at one:
 
 ```bash
-docker run -d --name pg -e POSTGRES_PASSWORD=pw -p 5432:5432 postgres:17
-TEST_DATABASE_URL=postgresql+psycopg://postgres:pw@localhost:5432/postgres uv run pytest
+docker run -d --name pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=flutter_modules_test -p 5432:5432 postgres:17
+TEST_DATABASE_URL=postgresql+psycopg://postgres:pw@localhost:5432/flutter_modules_test uv run pytest
 ```
 
-The suite drops and recreates every table, so never point it at a shared database.
+The suite drops and recreates every table, so never point it at a shared database; the I/J fixtures refuse any database whose name does not end in `_modules_test`. CI (`.github/workflows/server.yml`) runs all of this plus the migration check on every change under `server/`.
+
+## Deploy (Cloudflare)
+
+The API runs as a Cloudflare **Python Worker** (`cloudflare/`), reaching Neon through the Hyperdrive binding `HYPERDRIVE`. Live: `https://flutter-wars-api.srijan-guchhait.workers.dev` (`/health`, `/ready`, `/docs`).
+
+```bash
+cd server/cloudflare
+uv sync
+./build.sh                    # copies ../app into src/app (wrangler ignores symlinks)
+uv run pywrangler deploy      # bundles packages and runs `wrangler deploy` via npx
+```
+
+- The Worker uses `pg8000` (pure Python); `psycopg[binary]` has no Pyodide build. SQLAlchemy runs with `NullPool`: a Worker cannot reuse a socket across requests, and Hyperdrive does the pooling.
+- `cf deploy` cannot build Python Workers yet (it wants `cloudflare-py-dev-server`, which is unpublished), hence `pywrangler`.
+- Local run: `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://... uv run pywrangler dev`.
+
+### Database migrations
+
+Migrations never run inside the Worker. Run them from a machine or CI against Neon's **direct** (non-pooler) endpoint, after the code that needs them is reviewed and before deploying it:
+
+```bash
+cd server
+export DATABASE_URL="postgresql+psycopg://..."   # from: neon cs production --database-name neondb
+uv run alembic upgrade head
+```
+
+Rehearse on a Neon branch first (`neon branches create`); roll back with `alembic downgrade <rev>` or restore the branch to a point in time.
+
+### Configuration
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `DATABASE_URL` | local, CI, migrations | SQLAlchemy URL (`postgresql+psycopg://...`). Not used in the Worker. |
+| `TEST_DATABASE_URL` | tests | Disposable PostgreSQL database named `*_modules_test`. |
+| `HYPERDRIVE` binding | Worker | Set in `cloudflare/wrangler.jsonc`; credentials live in the Hyperdrive config, never in the repo. |
 
 ## Trading and Auction modules (I, J)
 

@@ -8,7 +8,7 @@ same suite plus the PostgreSQL-only concurrency tests.
 import os
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -65,9 +65,8 @@ def _make_engine() -> Engine:
 @pytest.fixture
 def engine() -> Iterator[Engine]:
     engine = _make_engine()
-    # Only the tables app.models registers: I/J tables are PostgreSQL-only and
-    # are created by their own `ij_engine`/`env` fixtures.
-    tables = [getattr(app.models, name).__table__ for name in app.models.__all__]
+    # I/J tables are PostgreSQL-only; their own `ij_engine`/`env` fixtures create them.
+    tables = [model.__table__ for model in app.models.SQLITE_SAFE]
     SQLModel.metadata.drop_all(engine, tables=tables)
     SQLModel.metadata.create_all(engine, tables=tables)
     yield engine
@@ -96,7 +95,11 @@ def clock() -> Clock:
 
 
 ORGANIZER = Principal(subject="organizer@example.com", role=Role.ORGANIZER)
-PARTICIPANT = Principal(subject="player@example.com", role=Role.PARTICIPANT, team_id=1)
+PARTICIPANT = Principal(
+    subject="player@example.com",
+    role=Role.PARTICIPANT,
+    team_id=UUID("00000000-0000-4000-8000-0000000000aa"),
+)
 
 
 class Api:

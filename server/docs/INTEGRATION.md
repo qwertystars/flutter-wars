@@ -10,12 +10,12 @@ was left untouched rather than silently changing the team-wide specification.
 | Owner | Required agreement |
 |---|---|
 | Foundation A | Fresh Session factory; READ COMMITTED; session-bound adapters; error envelope/routes; connection affinity |
-| Auth B | Verified JWT Principal; eligible current team; organizer authorization; no team IDs from request bodies |
+| Auth B | Replace `app.core.auth.get_principal` only; I/J derive their `Principal` from it. Verified JWT Principal; eligible current team; organizer authorization; no team IDs from request bodies |
 | Catalog D | Stable UUID; transactional eligibility/archive validation; historic references retained |
 | Ledger E | Account guards ordered by UUID; whole credits; balance minus ACTIVE reservations; atomic debit/credit/reserve/release/settle; stable business-reference uniqueness |
 | Inventory F | Atomic upsert/add; conditional nonnegative removal; mutation references; same transaction |
-| Market G | Round then listing/allocation guards; finite/infinite handling; resale destination/provenance; fixed allocated auction lot; shared pause/close policy |
-| Pricing H | One execution unit price per quantity; whole credits; consistent guarded state; record_trade receives completed BUY/SELL effects before commit; repricing/cache/history changes join the same transaction |
+| Market G | **Implemented:** `app/modules/market/adapter.py` (auction allocations are G's `market_auction_lot`). Round then listing/allocation guards; finite/infinite handling; resale destination/provenance; fixed allocated auction lot; shared pause/close policy |
+| Pricing H | **Implemented:** `app/modules/pricing/adapter.py`. One execution unit price per quantity; whole credits; consistent guarded state; record_trade receives completed BUY/SELL effects before commit; repricing/cache/history changes join the same transaction |
 | Admin K | Organizer permissions and mandatory action-audit integration; lifecycle actions call J's service |
 | Observability L | Safe codes and correlation; no bid amounts, bodies, SQL parameters, competitor identities, JWTs or raw exception logging |
 | Infrastructure M | Hyperdrive/Neon/session path; migrations; scheduling; retry/timeout handling; actual Cloudflare runtime compatibility |

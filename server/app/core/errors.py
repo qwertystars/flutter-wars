@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 
@@ -33,4 +34,16 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def _app_error(_: Request, exc: AppError) -> JSONResponse:
         body = {"error": {"code": exc.code, "message": exc.message, "context": exc.context}}
-        return JSONResponse(status_code=exc.status_code, content=body)
+        return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(body))
+
+    @app.exception_handler(Exception)
+    async def _unexpected(_: Request, exc: Exception) -> JSONResponse:
+        # Never echo exception text: it can carry SQL, parameters or secrets.
+        body = {
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "The operation could not be completed.",
+                "context": {},
+            }
+        }
+        return JSONResponse(status_code=500, content=body)

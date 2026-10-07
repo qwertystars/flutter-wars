@@ -6,6 +6,7 @@ with app.dependency_overrides.
 
 from dataclasses import dataclass
 from enum import StrEnum
+from uuid import UUID
 
 from fastapi import Depends
 
@@ -21,7 +22,11 @@ class Role(StrEnum):
 class Principal:
     subject: str
     role: Role
-    team_id: int | None = None
+    team_id: UUID | None = None
+
+    @property
+    def organizer(self) -> bool:
+        return self.role == Role.ORGANIZER
 
 
 def get_principal() -> Principal:

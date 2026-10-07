@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,7 +29,7 @@ class PricingConfigIn(_In):
 
 
 class ListingCreate(_In):
-    widget_id: int
+    widget_id: UUID
     base_price: int = Field(ge=1, le=MAX_PRICE)
     supply: SupplyIn = Field(description='Units available, or "infinite".')
     max_per_purchase: int | None = Field(default=None, ge=1, le=MAX_SUPPLY)
@@ -52,6 +53,11 @@ class RoundCreate(_In):
     listings: list[ListingCreate] = Field(default_factory=list, max_length=500)
 
 
+class AuctionLotCreate(_In):
+    auction_id: UUID = Field(description="The Auction Engine's id for the auction (DRAFT).")
+    quantity: int = Field(ge=1, le=MAX_SUPPLY)
+
+
 class TransitionIn(_In):
     expected_version: int | None = Field(
         default=None, description="Reject if the round changed since this version."
@@ -63,14 +69,14 @@ class TransitionIn(_In):
 
 
 class MarketOut(BaseModel):
-    id: int
+    id: UUID
     name: str
     is_active: bool
     created_at: datetime
 
 
 class RoundOut(BaseModel):
-    id: int
+    id: UUID
     sequence: int
     name: str
     kind: RoundKind
@@ -84,7 +90,7 @@ class RoundOut(BaseModel):
 
 
 class RoundAdminOut(RoundOut):
-    market_id: int
+    market_id: UUID
     version: int
     created_at: datetime
 
@@ -99,9 +105,9 @@ class PriceOut(BaseModel):
 
 
 class ListingOut(BaseModel):
-    id: int
-    round_id: int
-    widget_id: int
+    id: UUID
+    round_id: UUID
+    widget_id: UUID
     widget_name: str | None
     base_price: int
     infinite_supply: bool
@@ -145,4 +151,12 @@ class RoundEventOut(BaseModel):
     to_status: RoundStatus
     actor: str
     reason: str | None
+    created_at: datetime
+
+
+class AuctionLotOut(BaseModel):
+    auction_id: UUID
+    listing_id: UUID
+    quantity: int
+    consumed: bool
     created_at: datetime

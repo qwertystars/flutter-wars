@@ -12,6 +12,7 @@ database allows at most one open-or-paused round per market.
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +24,7 @@ from app.modules.market import repository as repo
 from app.modules.market.models import (
     LIVE_STATUSES,
     Market,
+    MarketAuctionLot,
     MarketListing,
     MarketRound,
     MarketRoundEvent,
@@ -44,7 +46,7 @@ TRANSITIONS: dict[Action, tuple[frozenset[RoundStatus], RoundStatus]] = {
 
 @dataclass(frozen=True)
 class ListingSpec:
-    widget_id: int
+    widget_id: UUID
     base_price: int
     supply: Supply
     max_per_purchase: int | None = None
@@ -115,14 +117,14 @@ def create_round(
     return rnd
 
 
-def get_round(session: Session, round_id: int) -> MarketRound:
+def get_round(session: Session, round_id: UUID) -> MarketRound:
     rnd = session.get(MarketRound, round_id)
     if rnd is None:
         raise NotFound("ROUND_NOT_FOUND", "Round not found.", round_id=round_id)
     return rnd
 
 
-def lock_round(session: Session, round_id: int, *, exclusive: bool = False) -> MarketRound:
+def lock_round(session: Session, round_id: UUID, *, exclusive: bool = False) -> MarketRound:
     """Lock the round row (FOR SHARE, or FOR UPDATE if exclusive) and return
     it freshly read, never a stale copy from the session's identity map.
 
@@ -151,7 +153,7 @@ def current_round(session: Session) -> MarketRound | None:
 
 def transition(
     session: Session,
-    round_id: int,
+    round_id: UUID,
     action: Action,
     *,
     now: datetime,
@@ -253,7 +255,7 @@ def transition(
     return rnd
 
 
-def round_events(session: Session, round_id: int) -> list[MarketRoundEvent]:
+def round_events(session: Session, round_id: UUID) -> list[MarketRoundEvent]:
     get_round(session, round_id)
     return list(
         session.exec(
@@ -284,7 +286,7 @@ def _supply_columns(supply: Supply) -> tuple[int | None, int | None]:
     return supply, supply
 
 
-def _check_widget(session: Session, widget_id: int) -> None:
+def _check_widget(session: Session, widget_id: UUID) -> None:
     widget = get_widget(session, widget_id)
     if widget is None:
         raise NotFound("WIDGET_NOT_FOUND", "Widget not found.", widget_id=widget_id)
@@ -292,7 +294,7 @@ def _check_widget(session: Session, widget_id: int) -> None:
         raise Conflict("WIDGET_ARCHIVED", "Archived widgets cannot be listed.", widget_id=widget_id)
 
 
-def _fresh_listing(session: Session, listing_id: int) -> MarketListing:
+def _fresh_listing(session: Session, listing_id: UUID) -> MarketListing:
     """Re-read a listing after taking a round lock; it may have been deleted meanwhile."""
     listing = session.exec(
         select(MarketListing)
@@ -304,12 +306,12 @@ def _fresh_listing(session: Session, listing_id: int) -> MarketListing:
     return listing
 
 
-def _lock_draft_listing(session: Session, listing_id: int) -> MarketListing:
+def _lock_draft_listing(session: Session, listing_id: UUID) -> MarketListing:
     _require_draft(lock_round(session, get_listing(session, listing_id).round_id, exclusive=True))
     return _fresh_listing(session, listing_id)
 
 
-def add_listing(session: Session, round_id: int, spec: ListingSpec) -> MarketListing:
+def add_listing(session: Session, round_id: UUID, spec: ListingSpec) -> MarketListing:
     rnd = lock_round(session, round_id, exclusive=True)
     _require_draft(rnd)
     _check_widget(session, spec.widget_id)
@@ -348,7 +350,7 @@ _UNSET: Any = object()
 
 def update_listing(
     session: Session,
-    listing_id: int,
+    listing_id: UUID,
     *,
     base_price: int = _UNSET,
     supply: Supply = _UNSET,
@@ -376,21 +378,21 @@ def update_listing(
     return listing
 
 
-def delete_listing(session: Session, listing_id: int) -> None:
+def delete_listing(session: Session, listing_id: UUID) -> None:
     listing = _lock_draft_listing(session, listing_id)
     pricing.remove_listing(session, listing.id)
     session.flush()  # no ORM relationship, so order the deletes by hand
     session.delete(listing)
 
 
-def get_listing(session: Session, listing_id: int) -> MarketListing:
+def get_listing(session: Session, listing_id: UUID) -> MarketListing:
     listing = session.get(MarketListing, listing_id)
     if listing is None:
         raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
     return listing
 
 
-def get_visible_listing(session: Session, listing_id: int) -> MarketListing:
+def get_visible_listing(session: Session, listing_id: UUID) -> MarketListing:
     """A listing participants may see: anything outside draft rounds."""
     listing = session.get(MarketListing, listing_id)
     if listing is not None and get_round(session, listing.round_id).status != RoundStatus.DRAFT:
@@ -398,7 +400,7 @@ def get_visible_listing(session: Session, listing_id: int) -> MarketListing:
     raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
 
 
-def listings_for_round(session: Session, round_id: int) -> list[MarketListing]:
+def listings_for_round(session: Session, round_id: UUID) -> list[MarketListing]:
     return repo.listings(session, round_id)
 
 
@@ -407,9 +409,9 @@ def listings_for_round(session: Session, round_id: int) -> list[MarketListing]:
 
 @dataclass(frozen=True)
 class TradableListing:
-    listing_id: int
-    round_id: int
-    widget_id: int
+    listing_id: UUID
+    round_id: UUID
+    widget_id: UUID
     round_kind: RoundKind
     base_price: int
     infinite_supply: bool
@@ -418,7 +420,7 @@ class TradableListing:
 
 
 def lock_listing_for_trade(
-    session: Session, listing_id: int, *, kind: RoundKind
+    session: Session, listing_id: UUID, *, kind: RoundKind
 ) -> TradableListing:
     """Check, inside the caller's transaction, that a listing can be traded
     right now. Holds a shared lock on the round row until the transaction
@@ -451,7 +453,7 @@ def lock_listing_for_trade(
     )
 
 
-def take_stock(session: Session, listing_id: int, quantity: int) -> int | None:
+def take_stock(session: Session, listing_id: UUID, quantity: int) -> int | None:
     """Atomically remove `quantity` units. Returns the remaining stock (None if infinite)."""
     listing = get_listing(session, listing_id)
     if quantity < 1:
@@ -476,7 +478,7 @@ def take_stock(session: Session, listing_id: int, quantity: int) -> int | None:
     return result[0]
 
 
-def return_stock(session: Session, listing_id: int, quantity: int) -> int | None:
+def return_stock(session: Session, listing_id: UUID, quantity: int) -> int | None:
     """Put units back (resale). Infinite listings stay infinite."""
     get_listing(session, listing_id)
     if quantity < 1:
@@ -490,3 +492,134 @@ def return_stock(session: Session, listing_id: int, quantity: int) -> int | None
     ).one()
     session.expire_all()
     return result[0]
+
+
+# --- auction lots: the market side of an Auction Engine (J) auction ---
+
+AuctionOperation = Literal["bid", "settle", "view"]
+
+
+def create_auction_lot(
+    session: Session, listing_id: UUID, *, auction_id: UUID, quantity: int
+) -> MarketAuctionLot:
+    """Hold `quantity` units of an auction-round listing for one J auction.
+
+    Organizer action, after J has created the auction (DRAFT) and before J
+    opens it. Allowed once the round has opened (listings are frozen then),
+    until it closes. The units leave stock now, so nothing can sell them twice.
+    """
+    if quantity < 1:
+        raise AppError("INVALID_QUANTITY", "Quantity must be at least 1.", quantity=quantity)
+    listing = get_listing(session, listing_id)
+    rnd = lock_round(session, listing.round_id)
+    if rnd.kind != RoundKind.AUCTION:
+        raise Conflict("WRONG_ROUND_KIND", "Auction lots need an auction round.", kind=rnd.kind)
+    if rnd.status not in LIVE_STATUSES:
+        raise Conflict(
+            "ROUND_NOT_LIVE",
+            "Lots can be held only while the round is open or paused.",
+            status=rnd.status,
+        )
+    listing = _fresh_listing(session, listing_id)
+    if listing.infinite_supply:
+        raise Conflict("INFINITE_SUPPLY", "Auction lots need a finite-supply listing.")
+    if session.get(MarketAuctionLot, auction_id) is not None:
+        raise Conflict(
+            "AUCTION_LOT_EXISTS", "This auction already has a lot.", auction_id=auction_id
+        )
+    stock = col(MarketListing.stock_remaining)
+    taken = session.exec(  # type: ignore[call-overload]
+        update(MarketListing)
+        .where(col(MarketListing.id) == listing_id, stock >= quantity)
+        .values(stock_remaining=stock - quantity)
+        .returning(stock),
+    ).one_or_none()
+    if taken is None:
+        session.refresh(listing)
+        raise Conflict("OUT_OF_STOCK", "Not enough stock left.", available=listing.stock_remaining)
+    lot = MarketAuctionLot(auction_id=auction_id, listing_id=listing_id, quantity=quantity)
+    session.add(lot)
+    try:
+        session.flush()
+    except IntegrityError:
+        raise Conflict(
+            "AUCTION_LOT_EXISTS", "This auction already has a lot.", auction_id=auction_id
+        ) from None
+    session.expire(listing)
+    return lot
+
+
+def _lock_lot(session: Session, auction_id: UUID) -> MarketAuctionLot | None:
+    return session.exec(
+        select(MarketAuctionLot)
+        .where(MarketAuctionLot.auction_id == auction_id)
+        .with_for_update()
+        .execution_options(populate_existing=True),
+    ).one_or_none()
+
+
+def guard_auction_lot(
+    session: Session,
+    *,
+    auction_id: UUID,
+    round_id: UUID,
+    listing_id: UUID,
+    widget_id: UUID,
+    quantity: int,
+    operation: AuctionOperation,
+) -> MarketAuctionLot:
+    """Check, inside the caller's transaction, that J may act on an auction.
+
+    Locks the round FOR SHARE (lifecycle cannot change underneath) and the
+    lot FOR UPDATE. It never locks the listing row: trades lock ledger
+    accounts before the listing, so locking it here could deadlock.
+    Bidding (and opening) needs an OPEN round and an unconsumed lot; settling
+    and viewing work after the round closes. A paused round blocks bids.
+    """
+    listing = session.get(MarketListing, listing_id)
+    if listing is None:
+        raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
+    rnd = lock_round(session, listing.round_id)
+    if (
+        rnd.id != round_id
+        or listing.widget_id != widget_id
+        or rnd.kind != RoundKind.AUCTION
+        or rnd.status == RoundStatus.DRAFT
+    ):
+        raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
+    lot = _lock_lot(session, auction_id)
+    if lot is None or lot.listing_id != listing_id or lot.quantity != quantity:
+        raise Conflict("AUCTION_LOT_MISSING", "No matching lot is held for this auction.")
+    if operation == "bid" and (rnd.status != RoundStatus.OPEN or lot.consumed):
+        raise Conflict("ROUND_NOT_OPEN", "Bidding is not open for this round.", status=rnd.status)
+    return lot
+
+
+def consume_auction_lot(session: Session, auction_id: UUID) -> None:
+    """J awarded the lot: its units now belong to the winner (via Inventory)."""
+    result = session.exec(  # type: ignore[call-overload]
+        update(MarketAuctionLot)
+        .where(
+            col(MarketAuctionLot.auction_id) == auction_id,
+            col(MarketAuctionLot.consumed).is_(False),
+        )
+        .values(consumed=True)
+    )
+    if result.rowcount != 1:
+        raise Conflict("AUCTION_LOT_MISSING", "No unconsumed lot is held for this auction.")
+
+
+def release_auction_lot(session: Session, auction_id: UUID) -> None:
+    """Return an unconsumed lot's units to stock (e.g. an auction with no bids)."""
+    lot = _lock_lot(session, auction_id)
+    if lot is None or lot.consumed:
+        raise Conflict("AUCTION_LOT_MISSING", "No unconsumed lot is held for this auction.")
+    stock = col(MarketListing.stock_remaining)
+    session.exec(  # type: ignore[call-overload]
+        update(MarketListing)
+        .where(col(MarketListing.id) == lot.listing_id)
+        .values(stock_remaining=stock + lot.quantity)
+    )
+    session.delete(lot)
+    session.flush()
+    session.expire_all()

@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.create_table('market',
-    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=120), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -27,8 +27,8 @@ def upgrade() -> None:
     )
     op.create_index('uq_market_single_active', 'market', ['is_active'], unique=True, postgresql_where=sa.text('is_active'), sqlite_where=sa.text('is_active'))
     op.create_table('market_round',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('market_id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('market_id', sa.Uuid(), nullable=False),
     sa.Column('sequence', sa.Integer(), nullable=False),
     sa.Column('name', sqlmodel.sql.sqltypes.AutoString(length=120), nullable=False),
     sa.Column('kind', sa.String(length=16), nullable=False),
@@ -48,9 +48,9 @@ def upgrade() -> None:
     op.create_index(op.f('ix_market_round_market_id'), 'market_round', ['market_id'], unique=False)
     op.create_index('uq_market_round_single_live', 'market_round', ['market_id'], unique=True, postgresql_where=sa.text("status IN ('open', 'paused')"), sqlite_where=sa.text("status IN ('open', 'paused')"))
     op.create_table('market_listing',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('round_id', sa.Integer(), nullable=False),
-    sa.Column('widget_id', sa.Integer(), nullable=False),
+    sa.Column('id', sa.Uuid(), nullable=False),
+    sa.Column('round_id', sa.Uuid(), nullable=False),
+    sa.Column('widget_id', sa.Uuid(), nullable=False),
     sa.Column('base_price', sa.BigInteger(), nullable=False),
     sa.Column('supply_total', sa.Integer(), nullable=True),
     sa.Column('stock_remaining', sa.Integer(), nullable=True),
@@ -70,7 +70,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_market_listing_widget_id'), 'market_listing', ['widget_id'], unique=False)
     op.create_table('market_round_event',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('round_id', sa.Integer(), nullable=False),
+    sa.Column('round_id', sa.Uuid(), nullable=False),
     sa.Column('action', sa.String(length=16), nullable=False),
     sa.Column('from_status', sa.String(length=16), nullable=False),
     sa.Column('to_status', sa.String(length=16), nullable=False),
@@ -82,7 +82,7 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_market_round_event_round_id'), 'market_round_event', ['round_id'], unique=False)
     op.create_table('listing_pricing',
-    sa.Column('listing_id', sa.Integer(), nullable=False),
+    sa.Column('listing_id', sa.Uuid(), nullable=False),
     sa.Column('strategy', sqlmodel.sql.sqltypes.AutoString(length=40), nullable=False),
     sa.Column('params', sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), 'postgresql'), nullable=False),
     sa.Column('params_version', sa.Integer(), nullable=False),
@@ -98,7 +98,7 @@ def upgrade() -> None:
     )
     op.create_table('price_history',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('listing_id', sa.Integer(), nullable=False),
+    sa.Column('listing_id', sa.Uuid(), nullable=False),
     sa.Column('interval_index', sa.Integer(), nullable=False),
     sa.Column('price', sa.BigInteger(), nullable=False),
     sa.Column('previous_price', sa.BigInteger(), nullable=True),

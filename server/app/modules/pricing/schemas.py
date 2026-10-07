@@ -1,11 +1,12 @@
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class PriceQuoteOut(BaseModel):
-    listing_id: int
+    listing_id: UUID
     price: int
     strategy: str
     interval_index: int
@@ -26,7 +27,7 @@ class PricingUpdate(BaseModel):
 
 
 class PricingConfigOut(BaseModel):
-    listing_id: int
+    listing_id: UUID
     strategy: str
     params: dict[str, Any]
     params_version: int

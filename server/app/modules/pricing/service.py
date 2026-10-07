@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
+from uuid import UUID
 
 from sqlmodel import Session, col, func, select
 
@@ -39,7 +40,7 @@ class TradeSide(StrEnum):
 
 @dataclass(frozen=True)
 class PriceQuote:
-    listing_id: int
+    listing_id: UUID
     price: int
     strategy: str
     interval_index: int
@@ -159,7 +160,7 @@ def _quote(state: ListingPricing, result: _Advanced) -> PriceQuote:
 
 
 def _load_for_update(
-    session: Session, listing_id: int
+    session: Session, listing_id: UUID
 ) -> tuple[ListingPricing, MarketListing, MarketRound]:
     """Lock round (shared) then pricing row (exclusive), the same order trades
     use, and return fresh copies. The listing is read after the pricing lock,
@@ -225,20 +226,20 @@ def configure_listing(
     return state
 
 
-def get_config(session: Session, listing_id: int) -> ListingPricing:
+def get_config(session: Session, listing_id: UUID) -> ListingPricing:
     state = session.get(ListingPricing, listing_id, populate_existing=True)
     if state is None:
         raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
     return state
 
 
-def remove_listing(session: Session, listing_id: int) -> None:
+def remove_listing(session: Session, listing_id: UUID) -> None:
     state = session.get(ListingPricing, listing_id)
     if state is not None:
         session.delete(state)
 
 
-def on_round_opened(session: Session, listing_ids: Iterable[int], opened_at: datetime) -> None:
+def on_round_opened(session: Session, listing_ids: Iterable[UUID], opened_at: datetime) -> None:
     """Record the opening price of every listing when a round first opens."""
     states = session.exec(
         select(ListingPricing)
@@ -261,7 +262,7 @@ def on_round_opened(session: Session, listing_ids: Iterable[int], opened_at: dat
 
 def update_pricing(
     session: Session,
-    listing_id: int,
+    listing_id: UUID,
     *,
     strategy: str | None,
     params: dict[str, Any],
@@ -282,7 +283,7 @@ def update_pricing(
 
 
 def update_params(
-    session: Session, listing_id: int, params: dict[str, Any], now: datetime
+    session: Session, listing_id: UUID, params: dict[str, Any], now: datetime
 ) -> ListingPricing:
     """Change parameters of a live listing. Elapsed intervals are settled with
     the old parameters first; the new ones apply from the next boundary."""
@@ -323,7 +324,7 @@ def update_params(
 # --- reads ---
 
 
-def quote(session: Session, listing_id: int, now: datetime) -> PriceQuote:
+def quote(session: Session, listing_id: UUID, now: datetime) -> PriceQuote:
     """Participant-visible price. Read-only: computes, never persists."""
     rows = _snapshot(session, col(ListingPricing.listing_id) == listing_id)
     if not rows:
@@ -332,7 +333,7 @@ def quote(session: Session, listing_id: int, now: datetime) -> PriceQuote:
     return _quote(state, _advance(state, listing, rnd, now))
 
 
-def quote_many(session: Session, round_id: int, now: datetime) -> dict[int, PriceQuote]:
+def quote_many(session: Session, round_id: UUID, now: datetime) -> dict[UUID, PriceQuote]:
     """Quotes for every listing of a round. Also refreshes those listings in the
     session, so stock shown next to a price comes from the same snapshot."""
     return {
@@ -341,7 +342,7 @@ def quote_many(session: Session, round_id: int, now: datetime) -> dict[int, Pric
     }
 
 
-def latest_activity(session: Session, listing_ids: list[int]) -> datetime | None:
+def latest_activity(session: Session, listing_ids: list[UUID]) -> datetime | None:
     """Latest time any of these listings was traded or repriced."""
     if not listing_ids:
         return None
@@ -353,7 +354,7 @@ def latest_activity(session: Session, listing_ids: list[int]) -> datetime | None
     return as_utc(latest) if latest else None
 
 
-def price_history(session: Session, listing_id: int) -> list[PriceHistory]:
+def price_history(session: Session, listing_id: UUID) -> list[PriceHistory]:
     return list(
         session.exec(
             select(PriceHistory)
@@ -366,7 +367,7 @@ def price_history(session: Session, listing_id: int) -> list[PriceHistory]:
 # --- internal contract for Transaction (I) ---
 
 
-def get_current_price(session: Session, listing_id: int, now: datetime) -> PriceQuote:
+def get_current_price(session: Session, listing_id: UUID, now: datetime) -> PriceQuote:
     """Authoritative price for a trade. Locks the listing's pricing row until
     the caller's transaction ends, so concurrent trades on one listing are
     priced one after another against committed state."""
@@ -376,13 +377,13 @@ def get_current_price(session: Session, listing_id: int, now: datetime) -> Price
     return _quote(state, result)
 
 
-def recalculate(session: Session, listing_id: int, now: datetime) -> PriceQuote:
+def recalculate(session: Session, listing_id: UUID, now: datetime) -> PriceQuote:
     """Settle any elapsed intervals now (e.g. from an organizer action)."""
     return get_current_price(session, listing_id, now)
 
 
 def record_trade(
-    session: Session, listing_id: int, quantity: int, side: TradeSide, now: datetime
+    session: Session, listing_id: UUID, quantity: int, side: TradeSide, now: datetime
 ) -> None:
     """Count a committed-in-this-transaction trade towards the current
     interval's demand. Call in the same transaction as the stock change."""

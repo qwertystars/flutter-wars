@@ -1,0 +1,7 @@
+.venv/
+.venv-workers/
+python_modules/
+pylock.toml
+.wrangler/
+node_modules/
+src/app/
