@@ -1,0 +1,8 @@
+Shared migration workflow (Module M). See ../docs/migrations.md.
+
+- env.py               : shared Alembic environment (DATABASE_URL, metadata, exclusions)
+- metadata_registry.py : where feature modules register their SQLModel models
+- versions/            : ordered revisions; 0001_infrastructure_baseline is empty
+
+Add a revision:  uv run alembic revision --autogenerate -m "<module>: <change>"
+Apply:           DATABASE_URL=... uv run alembic upgrade head

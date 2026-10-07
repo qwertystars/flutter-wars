@@ -9,5 +9,7 @@
     // neonflutterwars -> Neon project "Flutter Wars", branch production, db neondb
     { "binding": "HYPERDRIVE", "id": "85305d10a6ea4f8cb6e7b50a14faac71" }
   ],
+  // Non-secret. Credentials live in the Hyperdrive config, never here.
+  "vars": { "APP_ENV": "production" },
   "observability": { "enabled": true }
 }

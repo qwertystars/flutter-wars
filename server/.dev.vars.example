@@ -1,0 +1,6 @@
+# Copy to .dev.vars for `pywrangler dev` / `wrangler dev`. NEVER commit the real .dev.vars.
+# In local Worker dev, Hyperdrive connects directly to the DB named here
+# (no Hyperdrive pooling/caching locally).
+# See: https://developers.cloudflare.com/hyperdrive/configuration/local-development/
+APP_ENV=development
+CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://USER:PASSWORD@HOST:5432/DBNAME?sslmode=require
