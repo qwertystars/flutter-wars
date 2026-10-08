@@ -86,6 +86,10 @@ class GeometricBrokerage:
     unrounded proceeds = unit_price * (r + r**2 + ... + r**quantity)
     fee = gross_amount - unrounded proceeds
 
+    A sale is charged its share of the team's cumulative fee on the listing,
+    total(prior + quantity) - total(prior), so splitting one sale into many
+    requests pays the same total as selling it at once.
+
     Uses exact integer rational arithmetic, not Marketflow's binary floats.
     Short quantities are calculated exactly; larger quantities use rigorous
     bounds and return a fee only when BOTH bounds round to the same integer.
@@ -105,6 +109,7 @@ class GeometricBrokerage:
         quantity: int,
         unit_price: int,
         gross_amount: int,
+        prior_quantity: int = 0,
     ) -> int:
         if (
             type(quantity) is not int
@@ -114,11 +119,22 @@ class GeometricBrokerage:
             or type(gross_amount) is not int
             or not 0 <= gross_amount <= MAX_CREDITS
             or gross_amount != quantity * unit_price
+            or type(prior_quantity) is not int
+            or not 0 <= prior_quantity <= MAX_CREDITS
         ):
             raise ValueError("Invalid whole-credit brokerage inputs.")
-        impact = self.impact_bps
-        if impact == 0 or gross_amount == 0:
+        if self.impact_bps == 0 or gross_amount == 0:
             return 0
+        return self._total_fee(prior_quantity + quantity, unit_price) - self._total_fee(
+            prior_quantity, unit_price
+        )
+
+    def _total_fee(self, quantity: int, unit_price: int) -> int:
+        """Rounded fee for selling `quantity` units in one go (0 for none)."""
+        if quantity == 0:
+            return 0
+        gross_amount = quantity * unit_price
+        impact = self.impact_bps
         numerator = 10_000
         denominator = numerator + impact
         if quantity <= 32:
