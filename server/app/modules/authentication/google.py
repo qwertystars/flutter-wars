@@ -1,15 +1,16 @@
 """Google ID-token verification adapter.
 
 Async and dependency-light so it runs both under uvicorn and in a Cloudflare Python
-Worker: Google's signing keys are fetched with httpx and the token is verified with
-PyJWT (RS256), checking signature, expiry, audience (our OAuth client ID), issuer and
+Worker: Google's signing keys are fetched through app.modules.authentication.http and
+the token is verified with PyJWT (RS256), checking signature, expiry, audience (our OAuth client ID), issuer and
 that Google has verified the email.
 """
 
 import time
 
-import httpx
 import jwt
+
+from app.modules.authentication import http
 
 GOOGLE_CERTS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 GOOGLE_ISSUERS = frozenset({"accounts.google.com", "https://accounts.google.com"})
@@ -20,10 +21,8 @@ _KEYS_EXPIRE_AT = 0.0
 async def _signing_keys(refresh: bool = False) -> dict[str, dict]:
     global _KEYS, _KEYS_EXPIRE_AT
     if refresh or time.monotonic() >= _KEYS_EXPIRE_AT:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(GOOGLE_CERTS_URL)
-            response.raise_for_status()
-        _KEYS = {key["kid"]: key for key in response.json()["keys"]}
+        certs = await http.get_json(GOOGLE_CERTS_URL)
+        _KEYS = {key["kid"]: key for key in certs["keys"]}
         _KEYS_EXPIRE_AT = time.monotonic() + 3600
     return _KEYS
 
@@ -46,7 +45,7 @@ async def verify_google_token(credential: str, audience: str | None) -> dict[str
             audience=audience,
             options={"require": ["exp", "iat", "iss", "aud", "sub"]},
         )
-    except (jwt.PyJWTError, httpx.HTTPError, KeyError, ValueError):
+    except (jwt.PyJWTError, http.HttpError, KeyError, TypeError, ValueError):
         return None
     subject = claims.get("sub")
     email = claims.get("email")

@@ -1,15 +1,29 @@
 {
+  // Cloudflare Python Worker for the whole backend. Fill in the two IDs for your
+  // account (docs/deployment.md), or deploy with your own copy:
+  //   uv run pywrangler deploy --config wrangler.local.jsonc   (git-ignored)
   "name": "flutter-wars-api",
   "main": "src/worker.py",
-  // Srijan.guchhait@gmail.com's Account
-  "account_id": "ee4c08f37c3a62fedc87fbd1b8b96ff4",
+  "account_id": "<CLOUDFLARE_ACCOUNT_ID>",
   "compatibility_date": "2026-10-07",
   "compatibility_flags": ["python_workers"],
   "hyperdrive": [
-    // neonflutterwars -> Neon project "Flutter Wars", branch production, db neondb
-    { "binding": "HYPERDRIVE", "id": "85305d10a6ea4f8cb6e7b50a14faac71" }
+    // Hyperdrive config pointing at Neon's DIRECT host, caching disabled.
+    { "binding": "HYPERDRIVE", "id": "<HYPERDRIVE_CONFIG_ID>" }
   ],
-  // Non-secret. Credentials live in the Hyperdrive config, never here.
-  "vars": { "APP_ENV": "production" },
+  // Non-secret Module A settings. Secrets (JWT_SECRET_KEY, GOOGLE_OAUTH_CLIENT_SECRET)
+  // are set with `wrangler secret put`, never here.
+  "vars": {
+    "APP_NAME": "Flutter Wars backend",
+    "ENVIRONMENT": "production",
+    "LOG_LEVEL": "INFO",
+    "DATABASE_CONNECT_TIMEOUT_SECONDS": "10",
+    "DATABASE_POOL_SIZE": "1",
+    "DATABASE_MAX_OVERFLOW": "0",
+    "JWT_ALGORITHM": "HS256",
+    "JWT_ACCESS_TOKEN_MINUTES": "120",
+    "GOOGLE_OAUTH_CLIENT_ID": "<GOOGLE_OAUTH_CLIENT_ID>",
+    "GOOGLE_OAUTH_REDIRECT_URI": "https://<worker-host>/auth/google/callback"
+  },
   "observability": { "enabled": true }
 }

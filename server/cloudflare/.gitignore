@@ -5,3 +5,4 @@ pylock.toml
 .wrangler/
 node_modules/
 src/app/
+wrangler.local.jsonc

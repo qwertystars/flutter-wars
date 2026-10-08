@@ -7,6 +7,8 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi",
     "sqlmodel",
+    "pydantic-settings",
+    "pyjwt[crypto]",  # Module B JWTs and Google ID-token (RS256) verification
     "pg8000",  # pure-Python driver; psycopg cannot load in Pyodide (no libpq)
 ]
 
