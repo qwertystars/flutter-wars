@@ -6,6 +6,7 @@ from sqlmodel import Session
 from app.auction.repository import AuctionRepository
 from app.auction.schemas import AuctionCreate, AuctionView, BidRequest, MyBid, SettlementResponse
 from app.auction.service import AuctionService, NoBidHandler
+from app.trading.policies import DEFAULT_BROKERAGE
 from app.trading.repository import TradeRepository
 from app.trading.schemas import PurchaseRequest, SellRequest, TradeResponse
 from app.trading.service import TradingService
@@ -25,7 +26,7 @@ class BackendModules:
         *,
         session_factory: Callable[[], Session],
         adapter_factory: Callable[[Session], Adapters],
-        brokerage: BrokeragePolicy | None = None,
+        brokerage: BrokeragePolicy | None = DEFAULT_BROKERAGE,
         no_bid_handler: NoBidHandler | None = None,
     ):
         self.session_factory = session_factory
