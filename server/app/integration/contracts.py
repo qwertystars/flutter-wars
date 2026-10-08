@@ -114,8 +114,14 @@ class BrokeragePolicy(Protocol):
         quantity: int,
         unit_price: int,
         gross_amount: int,
+        prior_quantity: int = 0,
     ) -> int:
-        """Policy owns fee formula AND explicit whole-credit rounding."""
+        """Policy owns fee formula AND explicit whole-credit rounding.
+
+        prior_quantity: units this team already resold into this listing. A
+        quantity-dependent policy continues from there, so splitting one sale
+        into many requests cannot lower its total fee.
+        """
         ...
 
 
