@@ -17,5 +17,5 @@ class Principal(BaseModel):
     user_id: str = Field(min_length=1)
     # None for an organizer-only identity (Module K decides organizer access).
     team_id: UUID | None = None
-    role: str = Field(min_length=1)
+    role: str = Field(default="participant", min_length=1)
     email: str | None = None

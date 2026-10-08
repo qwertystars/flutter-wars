@@ -70,7 +70,14 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
         log_exception("request_validation_failed", exc)
-        return _response(AppError("REQUEST_VALIDATION_FAILED", "Request validation failed.", 422))
+        # Field locations and messages only: never echo the submitted input back.
+        errors = [
+            {"loc": [str(x) for x in e.get("loc", ())], "msg": str(e.get("msg", ""))[:200], "type": e.get("type")}
+            for e in exc.errors()[:20]
+        ]
+        return _response(
+            AppError("REQUEST_VALIDATION_FAILED", "Request validation failed.", 422, {"errors": errors})
+        )
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(_: Request, exc: Exception) -> JSONResponse:

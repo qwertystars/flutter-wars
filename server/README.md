@@ -32,7 +32,7 @@ docker start flutter-wars-postgres
 After PostgreSQL is running, apply the canonical Alembic migration chain:
 
 ```powershell
-$env:DATABASE_URL = "postgresql+psycopg://postgres:postgres@localhost:5432/flutter_wars"
+$env:DATABASE_URL = "postgresql+psycopg://postgres:pw@localhost:5432/flutter_wars"
 uv run alembic upgrade head
 ```
 

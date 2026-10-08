@@ -23,7 +23,9 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), autoincrement=True, primary_key=True),
         sa.Column("google_subject", sa.String(length=255), nullable=True),
         sa.Column("email", sa.String(length=320), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index(
         "ix_user_identity_google_subject", "user_identity", ["google_subject"], unique=True
@@ -34,7 +36,9 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("name", sa.String(length=128), nullable=False),
         sa.Column("status", sa.String(length=16), nullable=False, server_default="active"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
     )
     op.create_index("ix_team_name", "team", ["name"], unique=True)
     op.create_table(
@@ -43,7 +47,9 @@ def upgrade() -> None:
         sa.Column("user_identity_id", sa.Integer(), nullable=False),
         sa.Column("team_id", sa.Uuid(), nullable=False),
         sa.Column("role", sa.String(length=32), nullable=False, server_default="participant"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.ForeignKeyConstraint(["team_id"], ["team.id"]),
         sa.ForeignKeyConstraint(["user_identity_id"], ["user_identity.id"]),
     )

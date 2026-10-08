@@ -1,47 +1,55 @@
+"""Shared test setup for every suite. Runs before any `app` import.
+
+All suites use real PostgreSQL (row locks, CHECKs, triggers and partial indexes must
+be real). Each suite's database is wiped, so these URLs must name test databases:
+
+  TEST_DATABASE_URL          migrated schema (Alembic head), shared by foundation/,
+                             owners/ and e2e/; dropped and rebuilt once per session
+  MODULES_TEST_DATABASE_URL  market/ (Modules G-J), whose fixtures create and drop
+                             their own tables; must end in _modules_test
+  MIGRATION_DATABASE_URL     market/test_migrations.py; must end in _migration_test
+"""
+
 import os
+from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
-# The ASGI module exposes ``app`` for Uvicorn and therefore validates its
-# environment at import time. Tests provide an isolated local URL first.
-os.environ.setdefault("DATABASE_URL", "sqlite://")
-os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-not-for-production")
-os.environ.setdefault("JWT_ALGORITHM", "HS256")
-os.environ.setdefault("JWT_ACCESS_TOKEN_MINUTES", "60")
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL", "postgresql+psycopg://postgres:pw@localhost:5432/flutterwars_test"
+)
+assert "test" in TEST_DATABASE_URL, "Refusing to run tests against a non-test database"
 
-from app.core.config import Settings
-from app.core.db import reset_database_for_testing
-from app.main import create_app
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+for key, value in {
+    "APP_NAME": "Flutter Wars backend (tests)",
+    "ENVIRONMENT": "test",
+    "LOG_LEVEL": "INFO",
+    "DATABASE_CONNECT_TIMEOUT_SECONDS": "10",
+    "DATABASE_POOL_SIZE": "10",
+    "DATABASE_MAX_OVERFLOW": "20",
+    "JWT_SECRET_KEY": "test-jwt-secret-not-for-production-0123456789",
+    "JWT_ALGORITHM": "HS256",
+    "JWT_ACCESS_TOKEN_MINUTES": "60",
+}.items():
+    os.environ.setdefault(key, value)
 
-
-@pytest.fixture
-def settings() -> Settings:
-    return Settings(
-        APP_NAME="GDG Flutter Workshop Backend",
-        ENVIRONMENT="test",
-        LOG_LEVEL="INFO",
-        DATABASE_URL=os.environ["DATABASE_URL"],
-        DATABASE_CONNECT_TIMEOUT_SECONDS=10,
-        DATABASE_POOL_SIZE=5,
-        DATABASE_MAX_OVERFLOW=10,
-        JWT_SECRET_KEY=os.environ.get(
-            "JWT_SECRET_KEY", "test-jwt-secret-not-for-production"
-        ),
-        JWT_ALGORITHM="HS256",
-        JWT_ACCESS_TOKEN_MINUTES=60,
-    )
+SERVER = Path(__file__).resolve().parents[1]
 
 
-@pytest.fixture
-def app(settings: Settings):
-    reset_database_for_testing()
-    application = create_app(settings)
-    yield application
-    reset_database_for_testing()
+@pytest.fixture(scope="session")
+def migrated_schema() -> Iterator[None]:
+    """Drop the test schema and apply the whole migration history once."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import text
 
+    from app.core.db import get_engine
 
-@pytest.fixture
-def client(app):
-    with TestClient(app, raise_server_exceptions=False) as test_client:
-        yield test_client
+    with get_engine().begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
+    cfg = Config(str(SERVER / "alembic.ini"))
+    cfg.set_main_option("script_location", str(SERVER / "migrations"))
+    command.upgrade(cfg, "head")
+    yield
