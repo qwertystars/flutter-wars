@@ -114,6 +114,8 @@ These live in `app/modules/market/service.py` and run inside the caller's transa
 | `current_round(session)`, `get_round`, `get_listing` | Plain reads (may be cached in the session; do not base mutations on them). |
 | `create_auction_lot`, `guard_auction_lot`, `consume_auction_lot`, `release_auction_lot` | The auction side. `guard_auction_lot` locks the round `FOR SHARE` and the lot `FOR UPDATE`, **never the listing row**: trades lock ledger accounts before the listing, so locking it here could deadlock with a trade. Bidding needs an `open` round and an unconsumed lot; settling works after close. |
 
+**I/J use these through `app/modules/market/adapter.py` (`MarketAdapter`, the `MarketPort` implementation).** It maps G's codes to the port errors I/J document (`LISTING_NOT_FOUND`/`WRONG_ROUND_KIND` → `INVALID_LISTING`, `ROUND_NOT_OPEN` → `MARKET_NOT_OPEN`, `OUT_OF_STOCK` → `INSUFFICIENT_STOCK`, `AUCTION_LOT_MISSING` → `CONFIGURATION_REQUIRED`). Resale goes back into the same listing and only finite listings accept it. `release_unsold_lot` is a ready `NoBidHandler` if organizers decide unsold lots return to stock. `tests/test_gh_ij_integration.py` runs I/J end to end on these adapters.
+
 **Purchase recipe for Module I** (lock order: round → pricing row → listing stock → ledger → inventory; every stock change must happen under the pricing-row lock, which is why `get_current_price` comes before `take_stock`):
 
 ```python
@@ -137,7 +139,7 @@ session.commit()          # all or nothing
 - **Calls:**
   - Catalog (D) `get_widget(session, id)`: existence and `archived` check when listing a widget and when opening a round.
   - Pricing (H) `configure_listing`, `remove_listing`, `get_config`, `on_round_opened`, `quote_many`.
-- **Called by:** Transaction (I) and Auction (J) through the internal contract above. Admin (K) may proxy the organizer routes.
+- **Called by:** Transaction (I) and Auction (J) through `MarketAdapter` (above). Admin (K) may proxy the organizer routes.
 - **Exposes:** the participant and organizer routes above. `market_listing.id` is the listing ID used everywhere else.
 
 ## Decisions taken here that need lead/team approval (spec TBDs)
