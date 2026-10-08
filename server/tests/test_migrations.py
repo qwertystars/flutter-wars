@@ -29,7 +29,7 @@ def _alembic(*args: str, database_url: str | None) -> subprocess.CompletedProces
     return subprocess.run([ALEMBIC, *args], cwd=SERVER_DIR, env=env, capture_output=True, text=True)
 
 
-HEAD = "0001"
+HEAD = "0003"
 
 
 @pytest.fixture()

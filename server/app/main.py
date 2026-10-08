@@ -1,7 +1,7 @@
 """Application entrypoint.
 
-PLACEHOLDER bootstrap until Module A lands. Feature modules contribute routers
-through MODULES. All modules share one principal (app.core.auth.get_principal)
+PLACEHOLDER bootstrap until Module A lands. G/H contribute routers through
+MODULES. All modules share one principal (app.core.auth.get_principal)
 and one error shape (app.core.errors).
 """
 
@@ -14,8 +14,13 @@ from sqlmodel import Session
 
 from app.core.db import get_session
 from app.core.errors import install_error_handlers
+from app.modules.market import router as market_router
+from app.modules.pricing import router as pricing_router
 
-MODULES: dict[str, Sequence[APIRouter]] = {}
+MODULES: dict[str, Sequence[APIRouter]] = {
+    "market": (market_router.router, market_router.admin),
+    "pricing": (pricing_router.router, pricing_router.admin),
+}
 
 
 def create_app(modules: Sequence[str] | None = None) -> FastAPI:

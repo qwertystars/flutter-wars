@@ -2,7 +2,8 @@ Shared migration workflow (Module M). See ../docs/migrations.md.
 
 - env.py        : shared Alembic environment (DATABASE_URL or -x db_url, metadata, exclusions)
 - ../app/models.py : imports feature-module SQLModel tables for Alembic metadata
-- versions/     : one linear chain: 0001 D placeholder widget
+- versions/     : one linear chain: 0001 D placeholder widget, 0002 G/H tables,
+                  0003 G auction lots
 - infra_probe   : dev/test-only table excluded by env.py
 
 Add a revision:  uv run alembic revision --autogenerate -m "<module>: <change>"
