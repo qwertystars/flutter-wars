@@ -1,7 +1,10 @@
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
+from app.auction.models import Auction, AuctionState
 from app.integration.auth import Principal
 from app.main import create_app
 from tests.test_modules import bid
@@ -145,3 +148,27 @@ def test_admin_configuration_is_forbidden_to_participants(env):
         c.patch(f"/admin/auctions/{env.auction}/minimum-bid", json={"amount": 100}).status_code
         == 403
     )
+
+
+def test_draft_auction_is_hidden_from_participants(env):
+    draft = uuid4()
+    with Session(env.engine) as s, s.begin():
+        s.add(
+            Auction(
+                id=draft,
+                round_id=env.round,
+                listing_id=env.auction_listing,
+                widget_id=env.widget,
+                quantity=1,
+                state=AuctionState.DRAFT,
+                minimum_bid=4242,
+                starts_at=datetime.now(timezone.utc),
+                closes_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            )
+        )
+    c = client(env)
+    for path in (f"/auctions/{draft}", f"/auctions/{draft}/my-bid"):
+        response = c.get(path)
+        assert response.status_code == 404
+        assert response.json() == c.get(f"/auctions/{uuid4()}").json()
+        assert "4242" not in response.text

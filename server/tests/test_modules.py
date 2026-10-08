@@ -132,6 +132,23 @@ def test_finite_resale_uses_current_price_and_policy(env):
     assert env.snapshot() == {"balance": 5020, "reserved": 0, "stock": 5, "owned": 0, "trades": 2}
 
 
+def test_resale_brokerage_sees_prior_resold_quantity(env):
+    seen = []
+
+    class Recording:
+        def fee(self, *, prior_quantity, **_):
+            seen.append(prior_quantity)
+            return 0
+
+    env.runtime.brokerage = Recording()
+    buy(env, quantity=3)
+    key = uuid4()
+    sell(env, quantity=1, key=key)
+    sell(env, quantity=2)
+    sell(env, quantity=1, key=key)  # a retry returns the receipt and is not counted again
+    assert seen == [0, 1]
+
+
 def test_resale_retry(env):
     buy(env)
     key = uuid4()
