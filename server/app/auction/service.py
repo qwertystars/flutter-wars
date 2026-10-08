@@ -10,6 +10,7 @@ from app.integration.errors import (
     BidNotIncreasing,
     ConfigurationRequired,
     IdempotencyConflict,
+    NotFound,
 )
 from app.integration.transactions import lock_request, require_transaction
 
@@ -200,14 +201,25 @@ class AuctionService:
         self._repo.add(auction)
         return result
 
-    def view(self, auction_id: UUID) -> AuctionView:
+    def _published(self, auction_id: UUID) -> Auction:
+        """Participant reads: a DRAFT auction is unpublished and answers as missing.
+
+        Leaving DRAFT requires the market guard on an OPEN round, so a published
+        auction's round is already visible to participants.
+        """
         auction = self._repo.auction(auction_id)
+        if auction.state == AuctionState.DRAFT:
+            raise NotFound()
+        return auction
+
+    def view(self, auction_id: UUID) -> AuctionView:
+        auction = self._published(auction_id)
         view = AuctionView.model_validate(auction)
         if view.state == AuctionState.OPEN and self._repo.now() >= view.closes_at:
             view.state = AuctionState.CLOSED
         return view
 
     def my_bid(self, *, team_id: UUID, auction_id: UUID) -> MyBid | None:
-        self._repo.auction(auction_id)
+        self._published(auction_id)
         bid = self._repo.own_bid(auction_id=auction_id, team_id=team_id)
         return MyBid.model_validate(bid) if bid else None
