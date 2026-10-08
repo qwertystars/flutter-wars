@@ -127,3 +127,11 @@ def widgets(session: Session) -> list[Widget]:
     for item in items:
         session.refresh(item)
     return items
+
+
+@pytest.fixture(scope="session")
+def postgres_url() -> str:
+    """Module M infrastructure tests: the same disposable PostgreSQL database."""
+    if not PG_URL:
+        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL infrastructure tests.")
+    return PG_URL
