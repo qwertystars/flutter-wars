@@ -85,6 +85,10 @@ class TradingService:
             return existing
         if kind == TradeType.SELL and self._brokerage is None:
             raise ConfigurationRequired()
+        if kind == TradeType.SELL:
+            # Serialize this team's resales into one listing, so the prior quantity
+            # the brokerage sees cannot be raced by a concurrent split sale.
+            lock_request(self._trades.session, scope=f"resale:{team_id}:{request.listing_id}")
         get_listing = (
             self._market.get_for_purchase if kind == TradeType.BUY else self._market.get_for_resale
         )
@@ -103,6 +107,9 @@ class TradingService:
                 quantity=request.quantity,
                 unit_price=price,
                 gross_amount=gross,
+                prior_quantity=self._trades.sold_quantity(
+                    team_id=team_id, listing_id=listing.listing_id
+                ),
             )
             if type(fee) is not int or not 0 <= fee <= gross:
                 raise ConfigurationRequired("Brokerage must return a valid whole-credit fee.")

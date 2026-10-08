@@ -23,6 +23,7 @@ class FixedFeeBrokerage:
         quantity: int,
         unit_price: int,
         gross_amount: int,
+        prior_quantity: int = 0,
     ) -> int:
         return self.amount
 
@@ -46,6 +47,7 @@ class BasisPointsBrokerage:
         quantity: int,
         unit_price: int,
         gross_amount: int,
+        prior_quantity: int = 0,
     ) -> int:
         numerator = gross_amount * self.rate_bps
         if self.rounding == "ceil":

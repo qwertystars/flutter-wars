@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from .models import TradeTransaction, TradeType
@@ -23,6 +24,16 @@ class TradeRepository:
                 TradeTransaction.idempotency_key == idempotency_key,
             )
         ).one_or_none()
+
+    def sold_quantity(self, *, team_id: UUID, listing_id: UUID) -> int:
+        """Units this team has resold into this listing (receipts are immutable)."""
+        return self.session.exec(
+            select(func.coalesce(func.sum(TradeTransaction.quantity), 0)).where(
+                TradeTransaction.team_id == team_id,
+                TradeTransaction.listing_id == listing_id,
+                TradeTransaction.transaction_type == TradeType.SELL,
+            )
+        ).one()
 
     def history(self, *, team_id: UUID, limit: int, offset: int) -> list[TradeTransaction]:
         return list(
