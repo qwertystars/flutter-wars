@@ -45,7 +45,7 @@ class PricingStrategy[P: BaseModel](ABC):
         self.check_supply(params, infinite_supply=infinite_supply)
         return params  # type: ignore[return-value]
 
-    def check_supply(self, params: P, *, infinite_supply: bool) -> None:
+    def check_supply(self, params: P, *, infinite_supply: bool) -> None:  # noqa: B027 (optional hook)
         """Reject combinations the strategy cannot price."""
 
     @abstractmethod

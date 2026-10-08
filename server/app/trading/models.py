@@ -57,7 +57,7 @@ class TradeTransaction(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     team_id: UUID = Field(index=True)
     listing_id: UUID
-    widget_id: UUID
+    widget_id: str = Field(max_length=40)
     idempotency_key: UUID
     transaction_type: TradeType
     quantity: int = Field(gt=0, le=2147483647)

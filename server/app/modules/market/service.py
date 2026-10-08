@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, func, select, update
 
 from app.core.errors import AppError, Conflict, NotFound
-from app.modules.catalog.service import get_widget
+from app.modules.catalog.service import require_active_widget
 from app.modules.market import repository as repo
 from app.modules.market.models import (
     LIVE_STATUSES,
@@ -46,7 +46,7 @@ TRANSITIONS: dict[Action, tuple[frozenset[RoundStatus], RoundStatus]] = {
 
 @dataclass(frozen=True)
 class ListingSpec:
-    widget_id: UUID
+    widget_id: str
     base_price: int
     supply: Supply
     max_per_purchase: int | None = None
@@ -149,6 +149,27 @@ def current_round(session: Session) -> MarketRound | None:
     if market is None:
         return None
     return repo.live_round(session, market.id) or repo.latest_started_round(session, market.id)
+
+
+def status_summary(session: Session) -> dict[str, object]:
+    """Read-only market/round summary for the organizer dashboard (Module K's port)."""
+    market = repo.active_market(session)
+    rnd = current_round(session)
+    return {
+        "market": None if market is None else {"id": str(market.id), "name": market.name},
+        "round": None
+        if rnd is None
+        else {
+            "id": str(rnd.id),
+            "sequence": rnd.sequence,
+            "name": rnd.name,
+            "kind": rnd.kind,
+            "status": rnd.status,
+            "opened_at": rnd.opened_at,
+            "closed_at": rnd.closed_at,
+            "listings": len(listings_for_round(session, rnd.id)),
+        },
+    }
 
 
 def transition(
@@ -286,12 +307,9 @@ def _supply_columns(supply: Supply) -> tuple[int | None, int | None]:
     return supply, supply
 
 
-def _check_widget(session: Session, widget_id: UUID) -> None:
-    widget = get_widget(session, widget_id)
-    if widget is None:
-        raise NotFound("WIDGET_NOT_FOUND", "Widget not found.", widget_id=widget_id)
-    if widget.archived:
-        raise Conflict("WIDGET_ARCHIVED", "Archived widgets cannot be listed.", widget_id=widget_id)
+def _check_widget(session: Session, widget_id: str) -> None:
+    """Module D decides: 404 WIDGET_NOT_FOUND, 409 WIDGET_ARCHIVED."""
+    require_active_widget(session, widget_id)
 
 
 def _fresh_listing(session: Session, listing_id: UUID) -> MarketListing:
@@ -411,7 +429,7 @@ def listings_for_round(session: Session, round_id: UUID) -> list[MarketListing]:
 class TradableListing:
     listing_id: UUID
     round_id: UUID
-    widget_id: UUID
+    widget_id: str
     round_kind: RoundKind
     base_price: int
     infinite_supply: bool
@@ -564,7 +582,7 @@ def guard_auction_lot(
     auction_id: UUID,
     round_id: UUID,
     listing_id: UUID,
-    widget_id: UUID,
+    widget_id: str,
     quantity: int,
     operation: AuctionOperation,
 ) -> MarketAuctionLot:

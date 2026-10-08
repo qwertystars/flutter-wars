@@ -29,7 +29,7 @@ class PricingConfigIn(_In):
 
 
 class ListingCreate(_In):
-    widget_id: UUID
+    widget_id: str
     base_price: int = Field(ge=1, le=MAX_PRICE)
     supply: SupplyIn = Field(description='Units available, or "infinite".')
     max_per_purchase: int | None = Field(default=None, ge=1, le=MAX_SUPPLY)
@@ -107,7 +107,7 @@ class PriceOut(BaseModel):
 class ListingOut(BaseModel):
     id: UUID
     round_id: UUID
-    widget_id: UUID
+    widget_id: str
     widget_name: str | None
     base_price: int
     infinite_supply: bool

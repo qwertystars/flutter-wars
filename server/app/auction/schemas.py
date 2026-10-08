@@ -26,7 +26,7 @@ class AuctionView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     listing_id: UUID
-    widget_id: UUID
+    widget_id: str
     quantity: int
     state: AuctionState
     starts_at: datetime
@@ -48,7 +48,7 @@ class AuctionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     round_id: UUID
     listing_id: UUID
-    widget_id: UUID
+    widget_id: str
     quantity: int = Field(strict=True, gt=0, le=MAX_CREDITS)
     starts_at: AwareDatetime
     closes_at: AwareDatetime

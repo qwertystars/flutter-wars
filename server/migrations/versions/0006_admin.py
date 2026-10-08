@@ -1,13 +1,13 @@
 """Module K: organizer, admin_action_log (append-only), operational_control (seeded).
 
-Revision ID: 0005_admin
-Revises: 0004_inventory
+Revision ID: 0006_admin
+Revises: 0005_inventory
 """
 
 from alembic import op
 
-revision = "0005_admin"
-down_revision = "0004_inventory"
+revision = "0006_admin"
+down_revision = "0005_inventory"
 branch_labels = None
 depends_on = None
 

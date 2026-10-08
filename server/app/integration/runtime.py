@@ -28,11 +28,18 @@ class BackendModules:
         adapter_factory: Callable[[Session], Adapters],
         brokerage: BrokeragePolicy | None = DEFAULT_BROKERAGE,
         no_bid_handler: NoBidHandler | None = None,
+        freeze_guard: Callable[[Session, str], None] | None = None,
     ):
         self.session_factory = session_factory
         self.adapter_factory = adapter_factory
         self.brokerage = brokerage
         self.no_bid_handler = no_bid_handler
+        # Organizer emergency freeze (Module K), checked first in each participant mutation.
+        self.freeze_guard = freeze_guard
+
+    def _check_open(self, session: Session, scope: str) -> None:
+        if self.freeze_guard is not None:
+            self.freeze_guard(session, scope)
 
     def _trading(self, session: Session) -> TradingService:
         adapters = self.adapter_factory(session)
@@ -58,6 +65,7 @@ class BackendModules:
 
     def purchase(self, team_id: UUID, request: PurchaseRequest) -> TradeResponse:
         with self.session_factory() as session, session.begin():
+            self._check_open(session, "TRADING")
             result = TradeResponse.model_validate(
                 self._trading(session).purchase(team_id=team_id, request=request)
             )
@@ -65,6 +73,7 @@ class BackendModules:
 
     def sell(self, team_id: UUID, request: SellRequest) -> TradeResponse:
         with self.session_factory() as session, session.begin():
+            self._check_open(session, "TRADING")
             result = TradeResponse.model_validate(
                 self._trading(session).sell(team_id=team_id, request=request)
             )
@@ -87,6 +96,7 @@ class BackendModules:
 
     def bid(self, team_id: UUID, auction_id: UUID, request: BidRequest) -> MyBid:
         with self.session_factory() as session, session.begin():
+            self._check_open(session, "BIDDING")
             result = self._auction(session).bid(
                 team_id=team_id, auction_id=auction_id, request=request
             )

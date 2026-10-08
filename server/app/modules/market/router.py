@@ -4,10 +4,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
-from app.core.auth import Principal, get_principal, require_organizer
+from app.core.auth import Principal, get_principal
 from app.core.clock import get_now
 from app.core.db import get_session
 from app.core.errors import NotFound
+from app.modules.admin import OrganizerPrincipal, Permission, require_permission
 from app.modules.market import repository as repo
 from app.modules.market import service
 from app.modules.market.models import Market, MarketAuctionLot, MarketListing, MarketRound
@@ -33,9 +34,12 @@ from app.modules.market.schemas import (
 )
 from app.modules.pricing import service as pricing
 
+# Module K decides who is an organizer and what they may do.
+MARKET_MANAGE = require_permission(Permission.MARKET_MANAGE)
+
 router = APIRouter(tags=["market"])
 admin = APIRouter(
-    prefix="/admin/market", tags=["market admin"], dependencies=[Depends(require_organizer)]
+    prefix="/admin/market", tags=["market admin"], dependencies=[Depends(MARKET_MANAGE)]
 )
 
 
@@ -192,7 +196,7 @@ def _transition_route(action: service.Action):
         body: TransitionIn | None = None,
         session: Session = Depends(get_session),
         now: datetime = Depends(get_now),
-        principal: Principal = Depends(require_organizer),
+        organizer: OrganizerPrincipal = Depends(MARKET_MANAGE),
     ) -> RoundAdminOut:
         body = body or TransitionIn()
         rnd = service.transition(
@@ -200,7 +204,7 @@ def _transition_route(action: service.Action):
             round_id,
             action,
             now=now,
-            actor=principal.subject,
+            actor=organizer.actor,
             reason=body.reason,
             expected_version=body.expected_version,
         )

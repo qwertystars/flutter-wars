@@ -1,38 +1,65 @@
-import importlib
+"""Alembic environment for the one shared migration history (Module M).
+
+Every SQLModel-owning module (A-K and G-J) registers its tables through `app.models`. The URL
+comes from DATABASE_URL, or `alembic -x db_url=...`. Migrations run outside the
+Worker (locally or in CI) directly against Neon, never through Hyperdrive.
+"""
+
 import os
-import pkgutil
+from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
-import app.core._temp_models  # noqa: F401  TEMP
-import app.modules
+import app.models  # noqa: F401  (registers every table)
 
-# Import every app/modules/<name>/models.py so SQLModel.metadata knows all tables.
-# Auto-discovery: a new module (ours or another team's) is picked up without editing this file.
-for _m in pkgutil.iter_modules(app.modules.__path__):
-    try:
-        importlib.import_module(f"app.modules.{_m.name}.models")
-    except ModuleNotFoundError as e:
-        if e.name != f"app.modules.{_m.name}.models":
-            raise  # a real import error inside models.py must not be hidden
-
+config = context.config
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
 target_metadata = SQLModel.metadata
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+psycopg://postgres:pw@localhost:5432/flutterwars_dev")
+# Dev/test harness tables that must never enter the migration history.
+EXCLUDED_TABLES = frozenset({"infra_probe"})
+
+
+def include_object(object_, name, type_, reflected, compare_to):
+    return not (type_ == "table" and name in EXCLUDED_TABLES)
+
+
+def _database_url() -> str:
+    url = context.get_x_argument(as_dictionary=True).get("db_url") or os.environ.get(
+        "DATABASE_URL", ""
+    )
+    if not url.strip():
+        raise SystemExit(
+            "DATABASE_URL is required to run migrations (or pass -x db_url=...). "
+            "Migrations target Neon directly and never run inside the Worker."
+        )
+    return url.strip()
 
 
 def run_migrations_offline() -> None:
-    context.configure(url=DATABASE_URL, target_metadata=target_metadata, literal_binds=True)
+    context.configure(
+        url=_database_url(),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        include_object=include_object,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def run_migrations_online() -> None:
-    engine = create_engine(DATABASE_URL, poolclass=pool.NullPool)
-    with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+    section = config.get_section(config.config_ini_section, {})
+    section["sqlalchemy.url"] = _database_url()
+    connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

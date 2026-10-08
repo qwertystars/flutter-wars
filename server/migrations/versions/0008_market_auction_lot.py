@@ -1,15 +1,15 @@
 """Module G: units of an auction-round listing held for one Auction Engine auction.
 
-Revision ID: 0003
-Revises: 0002
+Revision ID: 0008_market_auction_lot
+Revises: 0007_market_pricing
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
-revision: str = '0003'
-down_revision: Union[str, Sequence[str], None] = '0002'
+revision: str = "0008_market_auction_lot"
+down_revision: Union[str, Sequence[str], None] = "0007_market_pricing"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

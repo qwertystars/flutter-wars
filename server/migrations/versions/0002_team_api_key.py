@@ -1,11 +1,10 @@
 """Create Module C team API-key storage."""
 
 import sqlalchemy as sa
-
 from alembic import op
 
-revision = "0001_module_c"
-down_revision = None
+revision = "0002_team_api_key"
+down_revision = "0001_identity"
 branch_labels = None
 depends_on = None
 

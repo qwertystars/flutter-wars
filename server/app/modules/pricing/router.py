@@ -4,9 +4,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
-from app.core.auth import Principal, get_principal, require_organizer
+from app.core.auth import Principal, get_principal
 from app.core.clock import get_now
 from app.core.db import get_session
+from app.modules.admin import Permission, require_permission
 from app.modules.market import service as market
 from app.modules.pricing import service
 from app.modules.pricing.models import ListingPricing, PriceHistory
@@ -19,9 +20,12 @@ from app.modules.pricing.schemas import (
 )
 from app.modules.pricing.strategies import available_strategies, get_strategy
 
+# Module K decides who is an organizer and what they may do.
+MARKET_MANAGE = require_permission(Permission.MARKET_MANAGE)
+
 router = APIRouter(tags=["pricing"])
 admin = APIRouter(
-    prefix="/admin/market", tags=["pricing admin"], dependencies=[Depends(require_organizer)]
+    prefix="/admin/market", tags=["pricing admin"], dependencies=[Depends(MARKET_MANAGE)]
 )
 
 

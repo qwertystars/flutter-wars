@@ -82,7 +82,7 @@ class MarketAdapter:
         auction_id: UUID,
         round_id: UUID,
         listing_id: UUID,
-        widget_id: UUID,
+        widget_id: str,
         quantity: int,
         operation: service.AuctionOperation,
     ) -> None:

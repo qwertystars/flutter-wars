@@ -23,7 +23,7 @@ class TradeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     listing_id: UUID
-    widget_id: UUID
+    widget_id: str
     transaction_type: TradeType
     quantity: int
     unit_price: int

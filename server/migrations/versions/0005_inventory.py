@@ -1,13 +1,13 @@
 """Module F: team_widget_inventory, inventory_event (+ append-only trigger).
 
-Revision ID: 0004_inventory
-Revises: 0003_ledger
+Revision ID: 0005_inventory
+Revises: 0004_ledger
 """
 
 from alembic import op
 
-revision = "0004_inventory"
-down_revision = "0003_ledger"
+revision = "0005_inventory"
+down_revision = "0004_ledger"
 branch_labels = None
 depends_on = None
 

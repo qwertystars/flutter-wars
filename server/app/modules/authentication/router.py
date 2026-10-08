@@ -1,7 +1,8 @@
 """HTTP routes for Module B authentication and identity."""
 
+import inspect
 from secrets import token_urlsafe
-from typing import Annotated, Callable
+from typing import Annotated, Any, Callable
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse
@@ -21,7 +22,12 @@ router = APIRouter(prefix="/auth", tags=["authentication"])
 _OAUTH_STATE_COOKIE = "google_oauth_state"
 
 
-def _google_verifier(request: Request) -> Callable[[str], dict[str, str] | None]:
+async def _resolved(value: Any) -> Any:
+    """Tests may install synchronous hooks; the real Google calls are async."""
+    return await value if inspect.isawaitable(value) else value
+
+
+def _google_verifier(request: Request) -> Callable[[str], Any]:
     configured = getattr(request.app.state, "google_token_verifier", None)
     if configured is not None:
         return configured
@@ -45,7 +51,7 @@ def _issue_token(
         access_token=create_access_token(
             user_id=principal.user_id,
             email=principal.email or google_identity["email"],
-            team_id=principal.team_id,
+            team_id=str(principal.team_id) if principal.team_id else None,
             role=principal.role,
             settings=request.app.state.settings,
         )
@@ -70,7 +76,7 @@ def google_login_redirect(request: Request) -> RedirectResponse:
 
 
 @router.get("/google/callback", response_model=TokenResponse)
-def google_login_callback(
+async def google_login_callback(
     request: Request,
     code: Annotated[str, Query(min_length=1)],
     state: Annotated[str, Query(min_length=1)],
@@ -80,25 +86,24 @@ def google_login_callback(
     if not expected_state or expected_state != state:
         raise AppError("OAUTH_STATE_INVALID", "OAuth sign-in could not be validated.", 400)
     configured_exchange = getattr(request.app.state, "google_code_exchange", None)
-    id_token = (
+    id_token = await _resolved(
         configured_exchange(code)
         if configured_exchange is not None
         else exchange_code(code, request.app.state.settings)
     )
-    verifier = _google_verifier(request)
-    google_identity = verifier(id_token)
+    google_identity = await _resolved(_google_verifier(request)(id_token))
     if google_identity is None:
         raise AppError("INVALID_GOOGLE_CREDENTIAL", "Google credential is invalid.", 401)
     return _issue_token(request, session, google_identity)
 
 
 @router.post("/google", response_model=TokenResponse)
-def google_login(
+async def google_login(
     payload: GoogleLoginRequest,
     request: Request,
     session: Annotated[Session, Depends(get_db)],
 ) -> TokenResponse:
-    google_identity = _google_verifier(request)(payload.credential)
+    google_identity = await _resolved(_google_verifier(request)(payload.credential))
     if google_identity is None:
         raise AppError("INVALID_GOOGLE_CREDENTIAL", "Google credential is invalid.", 401)
     return _issue_token(request, session, google_identity)
@@ -109,6 +114,6 @@ def get_me(principal: Annotated[Principal, Depends(get_principal)]) -> MeRespons
     return MeResponse(
         user_id=principal.user_id,
         email=principal.email,
-        team_id=principal.team_id,
+        team_id=str(principal.team_id) if principal.team_id else None,
         role=principal.role,
     )

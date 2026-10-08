@@ -2,7 +2,7 @@ from uuid import UUID
 
 from sqlmodel import Session, col, select
 
-from app.modules.catalog.models import Widget
+from app.modules.catalog import service as catalog
 from app.modules.market.models import LIVE_STATUSES, Market, MarketListing, MarketRound, RoundStatus
 
 
@@ -57,7 +57,7 @@ def listing_ids(session: Session, round_id: UUID) -> list[UUID]:
     )
 
 
-def listing_for_widget(session: Session, round_id: UUID, widget_id: UUID) -> MarketListing | None:
+def listing_for_widget(session: Session, round_id: UUID, widget_id: str) -> MarketListing | None:
     return session.exec(
         select(MarketListing).where(
             MarketListing.round_id == round_id, MarketListing.widget_id == widget_id
@@ -65,17 +65,15 @@ def listing_for_widget(session: Session, round_id: UUID, widget_id: UUID) -> Mar
     ).one_or_none()
 
 
-def archived_widget_ids(session: Session, round_id: UUID) -> list[UUID]:
-    return list(
-        session.exec(
-            select(Widget.id)
-            .join(MarketListing, col(MarketListing.widget_id) == Widget.id)
-            .where(MarketListing.round_id == round_id, col(Widget.archived).is_(True))
-            .order_by(col(Widget.name), col(Widget.id)),
-        )
+def archived_widget_ids(session: Session, round_id: UUID) -> list[str]:
+    """Listed widgets that Module D has archived, by display name."""
+    widget_ids = list(
+        session.exec(select(MarketListing.widget_id).where(MarketListing.round_id == round_id))
     )
+    widgets = catalog.get_widgets(session, widget_ids)
+    archived = [w for w in widgets.values() if w.archived]
+    return [w.id for w in sorted(archived, key=lambda w: (w.display_name, w.id))]
 
 
-def widget_names(session: Session, widget_ids: list[UUID]) -> dict[UUID, str]:
-    rows = session.exec(select(Widget.id, Widget.name).where(col(Widget.id).in_(widget_ids)))
-    return {widget_id: name for widget_id, name in rows}
+def widget_names(session: Session, widget_ids: list[str]) -> dict[str, str]:
+    return {w.id: w.display_name for w in catalog.get_widgets(session, widget_ids).values()}

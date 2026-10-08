@@ -12,7 +12,7 @@ import sys
 
 from sqlmodel import Session
 
-from app.core.db import engine
+from app.core.db import get_engine
 from app.core.errors import AppError
 from app.modules.admin import repository as repo
 from app.modules.admin import service
@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("list", help="list organizers")
     args = parser.parse_args(argv)
 
-    with Session(engine) as s:
+    with Session(get_engine()) as s:
         if args.cmd == "add-owner":
             try:
                 email = normalize_email(args.email)

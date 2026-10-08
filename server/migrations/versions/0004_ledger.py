@@ -1,13 +1,13 @@
 """Module E: team_wallet, credit_ledger_entry, credit_reservation (+ append-only trigger).
 
-Revision ID: 0003_ledger
-Revises: 0002_catalog
+Revision ID: 0004_ledger
+Revises: 0003_catalog
 """
 
 from alembic import op
 
-revision = "0003_ledger"
-down_revision = "0002_catalog"
+revision = "0004_ledger"
+down_revision = "0003_catalog"
 branch_labels = None
 depends_on = None
 

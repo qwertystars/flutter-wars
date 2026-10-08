@@ -103,7 +103,7 @@ class MarketListing(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     round_id: UUID = Field(foreign_key="market_round.id", index=True)
-    widget_id: UUID = Field(foreign_key="widget.id", index=True)
+    widget_id: str = Field(foreign_key="widget.id", index=True, max_length=40)
     base_price: int = Field(sa_type=sa.BigInteger)
     supply_total: int | None = None
     stock_remaining: int | None = None

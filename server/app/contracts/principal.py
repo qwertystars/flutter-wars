@@ -1,5 +1,7 @@
 """Authentication result contract owned by Foundation, populated by Module B."""
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -13,6 +15,7 @@ class Principal(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     user_id: str = Field(min_length=1)
-    team_id: str = Field(min_length=1)
+    # None for an organizer-only identity (Module K decides organizer access).
+    team_id: UUID | None = None
     role: str = Field(min_length=1)
     email: str | None = None

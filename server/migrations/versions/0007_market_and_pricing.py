@@ -1,18 +1,18 @@
 """Module G (market, rounds, listings) and Module H (pricing) tables.
 
-Revision ID: 0002
-Revises: 0001
+Revision ID: 0007_market_pricing
+Revises: 0006_admin
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 import sqlmodel
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '0002'
-down_revision: Union[str, Sequence[str], None] = '0001'
+revision: str = "0007_market_pricing"
+down_revision: Union[str, Sequence[str], None] = "0006_admin"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -50,7 +50,7 @@ def upgrade() -> None:
     op.create_table('market_listing',
     sa.Column('id', sa.Uuid(), nullable=False),
     sa.Column('round_id', sa.Uuid(), nullable=False),
-    sa.Column('widget_id', sa.Uuid(), nullable=False),
+    sa.Column('widget_id', sa.String(length=40), nullable=False),
     sa.Column('base_price', sa.BigInteger(), nullable=False),
     sa.Column('supply_total', sa.Integer(), nullable=True),
     sa.Column('stock_remaining', sa.Integer(), nullable=True),

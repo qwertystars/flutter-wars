@@ -3,6 +3,7 @@
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -19,20 +20,38 @@ class AppError(Exception):
         message: str,
         status_code: int = 400,
         context: dict[str, Any] | None = None,
+        *,
+        details: dict[str, Any] | None = None,
+        **fields: Any,
     ) -> None:
+        # Modules pass safe context as a dict (`context=`/`details=`) or as keyword fields.
+        merged = {**(context or {}), **(details or {}), **fields}
         self.code = code
         self.message = message
         self.status_code = status_code
-        self.context = context
+        self.context = merged or None
         super().__init__(message)
+
+    @property
+    def details(self) -> dict[str, Any]:
+        return self.context or {}
+
+
+class NotFound(AppError):
+    def __init__(self, code: str, message: str, **fields: Any) -> None:
+        super().__init__(code, message, 404, **fields)
+
+
+class Conflict(AppError):
+    def __init__(self, code: str, message: str, **fields: Any) -> None:
+        super().__init__(code, message, 409, **fields)
 
 
 def _response(error: AppError) -> JSONResponse:
+    body = ErrorResponse(code=error.code, message=error.message, context=error.context)
     return JSONResponse(
         status_code=error.status_code,
-        content=ErrorResponse(
-            code=error.code, message=error.message, context=error.context
-        ).model_dump(exclude_none=True),
+        content=jsonable_encoder({"error": body.model_dump(exclude_none=True)}),
     )
 
 
@@ -57,3 +76,7 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def unhandled_error_handler(_: Request, exc: Exception) -> JSONResponse:
         log_exception("unhandled_exception", exc)
         return _response(AppError("INTERNAL_SERVER_ERROR", "An unexpected error occurred.", 500))
+
+
+# Name used by modules written before Module A landed.
+register_error_handlers = install_exception_handlers

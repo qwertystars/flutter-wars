@@ -46,8 +46,36 @@ def configure_database(settings: Settings | None = None) -> Engine:
     return _engine
 
 
+def configure_engine(url: str, **kwargs: object) -> Engine:
+    """Use this engine instead of one built from Settings.
+
+    For runtimes whose connection details arrive with the first request, such as
+    a Cloudflare Worker's Hyperdrive binding (see server/cloudflare/).
+    """
+    global _engine, _session_factory
+    engine = create_engine(url, **kwargs)  # type: ignore[arg-type]
+    _engine = engine
+
+    def session_factory() -> Session:
+        return Session(engine)
+
+    _session_factory = session_factory
+    return engine
+
+
+def engine_configured() -> bool:
+    return _engine is not None
+
+
 def get_engine() -> Engine:
     return configure_database()
+
+
+def session_factory() -> Session:
+    """A new session on the configured engine (for owner-managed transactions)."""
+    configure_database()
+    assert _session_factory is not None
+    return _session_factory()
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -81,3 +109,7 @@ def reset_database_for_testing() -> None:
         _engine.dispose()
     _engine = None
     _session_factory = None
+
+
+# Name used by modules written before Module A landed.
+get_session = get_db

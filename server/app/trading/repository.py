@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, tuple_
 from sqlmodel import Session, select
 
 from .models import TradeTransaction, TradeType
@@ -44,6 +45,25 @@ class TradeRepository:
                 )
                 .order_by(TradeTransaction.created_at.desc(), TradeTransaction.id.desc())
                 .offset(offset)
+                .limit(limit)
+            ).all()
+        )
+
+    def feed(
+        self, *, team_id: UUID | None, limit: int, before: tuple[datetime, UUID] | None
+    ) -> list[TradeTransaction]:
+        """All teams' trades (or one team's), newest first, keyset-paginated."""
+        statement = select(TradeTransaction)
+        if team_id is not None:
+            statement = statement.where(TradeTransaction.team_id == team_id)
+        if before is not None:
+            created_at, trade_id = before
+            statement = statement.where(
+                tuple_(TradeTransaction.created_at, TradeTransaction.id) < tuple_(created_at, trade_id)
+            )
+        return list(
+            self.session.exec(
+                statement.order_by(TradeTransaction.created_at.desc(), TradeTransaction.id.desc())
                 .limit(limit)
             ).all()
         )

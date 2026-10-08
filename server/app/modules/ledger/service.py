@@ -288,3 +288,20 @@ def capture(
             actor=actor,
         ),
     )
+
+
+# ---------------------------------------------------------------- caller-owned transactions
+
+
+def lock_wallets(s: Session, team_ids: list[UUID]) -> None:
+    """Lock these teams' wallets (sorted, FOR UPDATE) before a multi-step change such as an
+    auction settlement, so concurrent spends and holds wait. Missing wallet -> WalletNotFound."""
+    found = set(repo.lock_wallets(s, team_ids))
+    if found != set(team_ids):
+        raise WalletNotFound()
+
+
+def get_active_reservation(s: Session, team_id: UUID, *, ref_type: str, ref_id: str) -> CreditReservation | None:
+    """The team's ACTIVE hold for this reference (locked), if any."""
+    _check_ref(ref_type, ref_id)
+    return repo.get_active_reservation(s, team_id, ref_type, ref_id)

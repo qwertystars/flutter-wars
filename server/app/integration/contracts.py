@@ -12,7 +12,7 @@ MAX_CREDITS = 2_147_483_647
 class PurchaseListing:
     listing_id: UUID
     round_id: UUID
-    widget_id: UUID
+    widget_id: str
 
 
 class LedgerPort(Protocol):
@@ -34,8 +34,8 @@ class LedgerPort(Protocol):
 class InventoryPort(Protocol):
     session: Session
 
-    def add(self, *, team_id: UUID, widget_id: UUID, quantity: int, reference: UUID) -> None: ...
-    def remove(self, *, team_id: UUID, widget_id: UUID, quantity: int, reference: UUID) -> None: ...
+    def add(self, *, team_id: UUID, widget_id: str, quantity: int, reference: UUID) -> None: ...
+    def remove(self, *, team_id: UUID, widget_id: str, quantity: int, reference: UUID) -> None: ...
 
 
 class MarketPort(Protocol):
@@ -57,7 +57,7 @@ class MarketPort(Protocol):
         auction_id: UUID,
         round_id: UUID,
         listing_id: UUID,
-        widget_id: UUID,
+        widget_id: str,
         quantity: int,
         operation: Literal["bid", "settle", "view"],
     ) -> None:
@@ -99,7 +99,7 @@ class CatalogPort(Protocol):
     session: Session
 
     def validate_widget(
-        self, *, widget_id: UUID, operation: Literal["buy", "sell", "award"]
+        self, *, widget_id: str, operation: Literal["buy", "sell", "award"]
     ) -> None:
         """Resolve identity and apply owner-configured archive/eligibility policy."""
         ...

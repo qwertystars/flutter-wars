@@ -1,12 +1,14 @@
 """HTTP adapter for Module C's lifecycle and read-only synchronization APIs."""
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, status
 from sqlmodel import Session
 
-from app.contracts.principal import Principal
 from app.core.db import get_db
+from app.core.errors import AppError
+from app.modules.admin import OrganizerPrincipal, ports
 from app.modules.ide_sync.auth import get_api_key_principal, require_organizer
 from app.modules.ide_sync.contracts import InventoryReader, UnconfiguredInventoryReader
 from app.modules.ide_sync.schemas import IdeState, IdeWidgetState, IssuedApiKey, RevokedApiKey
@@ -25,22 +27,25 @@ def _inventory_reader(request: Request) -> InventoryReader:
     status_code=status.HTTP_201_CREATED,
 )
 def issue_api_key(
-    team_id: str,
-    _: Annotated[Principal, Depends(require_organizer)],
+    team_id: UUID,
+    _: Annotated[OrganizerPrincipal, Depends(require_organizer)],
     session: Annotated[Session, Depends(get_db)] = None,
 ) -> IssuedApiKey:
-    record, plaintext_key = ApiKeyService(session).issue(team_id)
+    directory = ports.team_directory()
+    if directory is None or directory.get_team(session, team_id) is None:
+        raise AppError("TEAM_NOT_FOUND", "Team not found.", 404)
+    record, plaintext_key = ApiKeyService(session).issue(str(team_id))
     return IssuedApiKey(key_id=record.key_id, api_key=plaintext_key, created_at=record.created_at)
 
 
 @router.delete("/admin/teams/{team_id}/api-keys/{key_id}", response_model=RevokedApiKey)
 def revoke_api_key(
-    team_id: str,
+    team_id: UUID,
     key_id: str,
-    _: Annotated[Principal, Depends(require_organizer)],
+    _: Annotated[OrganizerPrincipal, Depends(require_organizer)],
     session: Annotated[Session, Depends(get_db)] = None,
 ) -> RevokedApiKey:
-    record = ApiKeyService(session).revoke(team_id, key_id)
+    record = ApiKeyService(session).revoke(str(team_id), key_id)
     assert record.revoked_at is not None
     return RevokedApiKey(key_id=record.key_id, status=record.status, revoked_at=record.revoked_at)
 

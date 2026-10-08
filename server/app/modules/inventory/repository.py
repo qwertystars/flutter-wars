@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
-from app.core._temp_models import Team  # TEMP: switch to Module B's team model
+from app.modules.authentication.model import Team
 from app.modules.inventory.errors import DuplicateReference
 from app.modules.inventory.models import InventoryEvent, TeamWidgetInventory
 

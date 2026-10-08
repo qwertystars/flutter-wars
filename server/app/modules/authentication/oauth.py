@@ -2,7 +2,7 @@
 
 from urllib.parse import urlencode
 
-import requests
+import httpx
 
 from app.core.config import Settings
 from app.core.errors import AppError
@@ -28,24 +28,24 @@ def authorization_url(settings: Settings, state: str) -> str:
     return f"{GOOGLE_AUTHORIZATION_URL}?{query}"
 
 
-def exchange_code(code: str, settings: Settings) -> str:
+async def exchange_code(code: str, settings: Settings) -> str:
     if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
         raise AppError("AUTH_CONFIG_MISSING", "Google OAuth is not configured.", 503)
     try:
-        response = requests.post(
-            GOOGLE_TOKEN_URL,
-            data={
-                "code": code,
-                "client_id": settings.google_oauth_client_id,
-                "client_secret": settings.google_oauth_client_secret.get_secret_value(),
-                "redirect_uri": settings.google_oauth_redirect_uri,
-                "grant_type": "authorization_code",
-            },
-            timeout=10,
-        )
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                GOOGLE_TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": settings.google_oauth_client_id,
+                    "client_secret": settings.google_oauth_client_secret.get_secret_value(),
+                    "redirect_uri": settings.google_oauth_redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
         response.raise_for_status()
         token = response.json().get("id_token")
-    except (requests.RequestException, ValueError) as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         raise AppError(
             "GOOGLE_CODE_EXCHANGE_FAILED", "Google sign-in could not be completed.", 401
         ) from exc

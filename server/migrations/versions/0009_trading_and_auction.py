@@ -3,16 +3,16 @@
 Runs the reviewed SQL in migrations/0001_modules_i_j.sql unchanged, so that
 file stays the single source tests/test_migration.py checks.
 
-Revision ID: 0004
-Revises: 0003
+Revision ID: 0009_trading_auction
+Revises: 0008_market_auction_lot
 """
 from pathlib import Path
 from typing import Sequence, Union
 
 from alembic import op
 
-revision: str = '0004'
-down_revision: Union[str, Sequence[str], None] = '0003'
+revision: str = "0009_trading_auction"
+down_revision: Union[str, Sequence[str], None] = "0008_market_auction_lot"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

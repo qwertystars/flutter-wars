@@ -1,14 +1,14 @@
 """Module D: widget (the catalog). Never deleted, only archived; id and appdev_key never change.
 No price, stock or allocation columns here (spec §6): those belong to Pricing, Market and Inventory.
 
-Revision ID: 0002_catalog
-Revises: 0001_temp_team
+Revision ID: 0003_catalog
+Revises: 0002_team_api_key
 """
 
 from alembic import op
 
-revision = "0002_catalog"
-down_revision = "0001_temp_team"
+revision = "0003_catalog"
+down_revision = "0002_team_api_key"
 branch_labels = None
 depends_on = None
 

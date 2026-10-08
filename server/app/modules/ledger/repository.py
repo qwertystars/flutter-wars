@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
-from app.core._temp_models import Team
+from app.modules.authentication.model import Team
 from app.modules.ledger.errors import DuplicateReference
 from app.modules.ledger.models import CreditLedgerEntry, CreditReservation, TeamWallet
 
@@ -158,6 +158,34 @@ def active_reservation_exists(s: Session, team_id: UUID, ref_type: str, ref_id: 
         CreditReservation.status == "ACTIVE",
     )
     return s.exec(stmt).first() is not None
+
+
+def get_active_reservation(
+    s: Session, team_id: UUID, ref_type: str, ref_id: str
+) -> CreditReservation | None:
+    stmt = (
+        select(CreditReservation)
+        .where(
+            CreditReservation.team_id == team_id,
+            CreditReservation.ref_type == ref_type,
+            CreditReservation.ref_id == ref_id,
+            CreditReservation.status == "ACTIVE",
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return s.exec(stmt).first()
+
+
+def lock_wallets(s: Session, team_ids: list[UUID]) -> list[UUID]:
+    """FOR UPDATE on each team's wallet in sorted team_id order. Returns the ids that have one."""
+    stmt = (
+        select(TeamWallet.team_id)
+        .where(col(TeamWallet.team_id).in_(sorted(set(team_ids))))
+        .order_by(col(TeamWallet.team_id))
+        .with_for_update()
+    )
+    return list(s.exec(stmt).all())
 
 
 def insert_reservation(s: Session, res: CreditReservation) -> CreditReservation:

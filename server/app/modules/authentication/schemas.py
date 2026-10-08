@@ -15,6 +15,6 @@ class TokenResponse(BaseModel):
 class MeResponse(BaseModel):
     user_id: str
     email: str | None
-    team_id: str
+    team_id: str | None
     role: str
     auth_type: str = "JWT"

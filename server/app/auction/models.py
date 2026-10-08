@@ -26,7 +26,7 @@ class Auction(SQLModel, table=True):
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     round_id: UUID = Field(index=True)
     listing_id: UUID
-    widget_id: UUID
+    widget_id: str = Field(max_length=40)
     quantity: int = Field(gt=0, le=2147483647)
     state: AuctionState = Field(default=AuctionState.DRAFT)
     starts_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
