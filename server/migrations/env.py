@@ -1,6 +1,11 @@
-"""Alembic environment. PROVISIONAL: Module M owns the final migration
-workflow; this reads DATABASE_URL and the shared SQLModel metadata."""
+"""Alembic environment for the shared migration history (Module M).
 
+Every SQLModel-owning module registers its tables through `app.models`. The URL
+comes from DATABASE_URL, or `alembic -x db_url=...`. Migrations run outside the
+Worker (locally or in CI) directly against Neon, never through Hyperdrive.
+"""
+
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -8,25 +13,53 @@ from sqlalchemy import engine_from_config, pool
 from sqlmodel import SQLModel
 
 import app.models  # noqa: F401  (registers every table)
-from app.core.config import get_settings
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 target_metadata = SQLModel.metadata
+
+# Dev/test harness tables that must never enter the migration history.
+EXCLUDED_TABLES = frozenset({"infra_probe"})
+
+
+def include_object(object_, name, type_, reflected, compare_to):
+    return not (type_ == "table" and name in EXCLUDED_TABLES)
+
+
+def _database_url() -> str:
+    url = context.get_x_argument(as_dictionary=True).get("db_url") or os.environ.get(
+        "DATABASE_URL", ""
+    )
+    if not url.strip():
+        raise SystemExit(
+            "DATABASE_URL is required to run migrations (or pass -x db_url=...). "
+            "Migrations target Neon directly and never run inside the Worker."
+        )
+    return url.strip()
 
 
 def run_migrations_offline() -> None:
-    context.configure(url=config.get_main_option("sqlalchemy.url"), target_metadata=target_metadata, literal_binds=True)
+    context.configure(
+        url=_database_url(),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        include_object=include_object,
+    )
     with context.begin_transaction():
         context.run_migrations()
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool)
+    section = config.get_section(config.config_ini_section, {})
+    section["sqlalchemy.url"] = _database_url()
+    connectable = engine_from_config(section, prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

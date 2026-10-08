@@ -319,3 +319,11 @@ def env(ij_engine):
     yield Environment(engine)
     SQLModel.metadata.drop_all(engine)
     metadata.drop_all(engine)
+
+
+@pytest.fixture(scope="session")
+def postgres_url() -> str:
+    """Module M infrastructure tests: the same disposable PostgreSQL database."""
+    if not PG_URL:
+        pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL infrastructure tests.")
+    return PG_URL

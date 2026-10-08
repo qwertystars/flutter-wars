@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "fastapi",
     "sqlmodel",
-    "pg8000",  # pure-Python driver; psycopg[binary] has no Pyodide build
+    "pg8000",  # pure-Python driver; psycopg cannot load in Pyodide (no libpq)
 ]
 
 [dependency-groups]

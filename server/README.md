@@ -14,7 +14,7 @@ Python + FastAPI + SQLModel on Neon PostgreSQL (through Cloudflare Hyperdrive), 
 | `app/core/` | A: Foundation, plus the B/K principal | **Placeholder.** One `get_session`, `get_principal`, `AppError` shape and `get_now` for every module (I/J's principal and errors derive from these), plus `/health` and `/ready`. `get_principal` rejects every request until Module B replaces it. |
 | `app/modules/catalog/` | D: Widget Catalog | **Placeholder.** A minimal `widget` table plus `get_widget()`. |
 | `migrations/` | M: Infrastructure | One Alembic chain: `0001` placeholder widget table (D replaces it), `0002` G/H tables, `0003` G auction lots, `0004` I/J tables (runs the reviewed `migrations/0001_modules_i_j.sql`). CI checks it matches the models and rolls back. |
-| `cloudflare/` | M: Infrastructure | Cloudflare Python Worker packaging (Hyperdrive → Neon). See [Deploy](#deploy-cloudflare). |
+| `app/infra/`, `cloudflare/` | M: Infrastructure | Infra settings/DB/probe helpers; Worker packaging for `app/main.py:create_app` (pg8000 → Hyperdrive → Neon; local tooling uses psycopg). Single `flutter-wars-api` Worker; cache-disabled primary `HYPERDRIVE`. Deploy with `scripts/deploy.sh` after migrations. CI: `.github/workflows/ci.yml`; gated production deploy: `.github/workflows/deploy.yml`. See [docs/deployment.md](docs/deployment.md). |
 
 Each module follows the same layout: `models.py` (SQLModel tables), `schemas.py` (API payloads), `service.py` (business rules and the internal contracts for other modules), `router.py` (thin FastAPI routes), plus `repository.py` in market for queries. Modules register in `app/main.py:MODULES`.
 
