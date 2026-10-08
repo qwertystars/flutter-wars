@@ -1,5 +1,11 @@
 # Deployment (Module M)
 
+> The Worker builds the whole app (Modules A-K) on its first request. Its settings and
+> secrets are listed in [environment-reference.md](environment-reference.md#application-settings-module-a);
+> set `JWT_SECRET_KEY` and `GOOGLE_OAUTH_CLIENT_SECRET` with `wrangler secret put` before
+> the first deploy, and register `<worker-url>/auth/google/callback` as an authorized
+> redirect URI on the Google OAuth web client.
+
 Backend: Cloudflare Python Worker → FastAPI → sync SQLModel/SQLAlchemy → pg8000
 → Hyperdrive → Neon PostgreSQL. Migrations run outside the Worker, directly
 against Neon (control-plane operation), never through Hyperdrive.

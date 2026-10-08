@@ -1,5 +1,24 @@
 # Environment Variable Reference
 
+## Application settings (Module A)
+
+The app reads these through `app/core/config.py` (pydantic-settings). Locally they come
+from the environment or `.env`; in the Worker, from `vars` in `wrangler.jsonc` and from
+`wrangler secret put` for the two secrets.
+
+| Variable | Secret | Worker source | Notes |
+|---|---|---|---|
+| `APP_NAME`, `ENVIRONMENT`, `LOG_LEVEL` | no | `vars` | |
+| `DATABASE_URL` | yes | built from the `HYPERDRIVE` binding | locally: `postgresql+psycopg://...` |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS`, `DATABASE_POOL_SIZE`, `DATABASE_MAX_OVERFLOW` | no | `vars` | the Worker uses NullPool regardless |
+| `JWT_SECRET_KEY` | yes | `wrangler secret put` | unique per environment |
+| `JWT_ALGORITHM`, `JWT_ACCESS_TOKEN_MINUTES` | no | `vars` | |
+| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_REDIRECT_URI` | no | `vars` | the client ID is the token audience |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | yes | `wrangler secret put` | server-side sign-in only |
+
+The variables below (`APP_ENV`, `DB_*`) configure the Module M helpers in `app/infra`
+and the operational scripts.
+
 Never commit real values. Examples use placeholders only.
 
 ## Application / database settings

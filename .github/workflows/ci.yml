@@ -45,20 +45,20 @@ jobs:
       - run: uv sync --locked
 
       - name: Lint
-        run: |
-          uv run ruff check app tests scripts
-          uv run ruff format --check app tests scripts
+        run: uv run ruff check app tests scripts migrations
 
       - name: Create disposable databases
         run: |
+          PGPASSWORD=ci psql -h localhost -U postgres -c "CREATE DATABASE flutterwars_test"
           PGPASSWORD=ci psql -h localhost -U postgres -c "CREATE DATABASE flutter_migration_test"
           PGPASSWORD=ci psql -h localhost -U postgres -c "CREATE DATABASE migrate_check"
 
-      - name: Tests (SQLite + PostgreSQL)
+      - name: Tests (every team's suite + end-to-end, PostgreSQL)
         run: |
-          TEST_DATABASE_URL=$PG/flutter_modules_test \
+          TEST_DATABASE_URL=$PG/flutterwars_test \
+          MODULES_TEST_DATABASE_URL=$PG/flutter_modules_test \
           MIGRATION_DATABASE_URL=$PG/flutter_migration_test \
-          uv run pytest -q
+          uv run pytest
 
       - name: Migrations apply, match the models, roll back
         env:

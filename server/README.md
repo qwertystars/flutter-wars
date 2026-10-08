@@ -1,69 +1,104 @@
-# GDG Flutter Workshop Backend
+# Flutter Wars backend
 
-Module A provides the intentionally thin FastAPI foundation shared by all backend modules. It does not own business entities or authentication logic.
+The GDG VIT Chennai Flutter Workshop backend: Python + FastAPI + SQLModel on Neon
+PostgreSQL, served by a Cloudflare Python Worker through Hyperdrive. It follows
+*GDG Flutter Workshop: Final Modular Architecture* v1.0 and combines the modules
+three teams built.
 
-## Prerequisites and installation
+## Modules and owners
 
-Use Python 3.11+ and [uv](https://docs.astral.sh/uv/) (or install the dependencies from `pyproject.toml` with your preferred Python environment manager).
+| Module | Path | Team |
+|---|---|---|
+| A Foundation, configuration, shared contracts | `app/core`, `app/contracts`, `app/main.py` | Team 6 (Aadityasiva) |
+| B Authentication, team identity, JWT | `app/modules/authentication` | Team 6 |
+| C Team API keys, IDE sync | `app/modules/ide_sync` | Team 6 |
+| D Widget catalog | `app/modules/catalog` | Team 3 (Anish Prakash, Saswat Singh) |
+| E Credit ledger and wallet | `app/modules/ledger` | Team 3 |
+| F Team widget inventory | `app/modules/inventory` | Team 3 |
+| G Market and round lifecycle | `app/modules/market` | Team 2 (Srijan Guchhait) |
+| H Pricing engine | `app/modules/pricing` | Team 2 |
+| I Purchase / trade engine | `app/trading` | Team 2 (Daksh Agarwal, Srijan Guchhait) |
+| J Auction and bidding | `app/auction` | Team 2 (Daksh Agarwal, Srijan Guchhait) |
+| K Organizer / admin control plane | `app/modules/admin` | Team 3 |
+| L Audit, observability | `app/core/logging.py` hook only | not yet owned |
+| M Infrastructure, deployment, DB operations | `app/infra`, `cloudflare/`, `migrations/`, `scripts/`, `docs/` | Team 2 (J. Navin, Srijan Guchhait) |
 
-```powershell
-uv sync --all-groups
-Copy-Item .env.example .env
-```
+Module docs: [A](docs/module-a.md), [B](docs/module-b.md), [C](docs/module-c.md),
+[G](docs/market.md), [H](docs/pricing.md), [I/J integration](docs/INTEGRATION.md),
+[M](docs/deployment.md).
 
-Set `DATABASE_URL` in `.env`. For local development, start PostgreSQL in Docker:
+## How the modules connect
 
-```powershell
-docker run --name flutter-wars-postgres `
-  -e POSTGRES_USER=postgres `
-  -e POSTGRES_PASSWORD=postgres `
-  -e POSTGRES_DB=flutter_wars `
-  -p 5432:5432 `
-  -d postgres:18
-```
+Every cross-module link is registered in one place, `app/integration/wiring.py`:
 
-The `.env.example` URL points to this container. Stop and restart it with:
+- **Identity:** Module B verifies Google sign-in and issues the JWT; every route uses its
+  principal. Team ids are UUIDs. Module K's `organizer` table decides who is an
+  organizer (checked on every request), and its permissions guard every `/admin` route.
+  An organizer signs in with Google like anyone else; their token has no team.
+- **Teams:** Module K creates and disables teams through Module B's team directory.
+- **Purchases and auctions:** Modules I and J run each operation in one transaction over
+  the owners' services: G (round, stock, auction lots), H (price), D (widget), E (credits
+  and bid holds) and F (inventory). Module K's emergency freeze is checked first in every
+  purchase, sale and bid.
+- **IDE sync:** Module C reads team inventory from Module F.
+- **Dashboard:** Module K reads market status from G and the cross-team trade feed from I.
 
-```powershell
-docker stop flutter-wars-postgres
-docker start flutter-wars-postgres
-```
+Errors share one shape: `{"error": {"code": ..., "message": ..., "context": {...}}}`.
 
-After PostgreSQL is running, apply the canonical Alembic migration chain:
+## Run locally
 
-```powershell
-$env:DATABASE_URL = "postgresql+psycopg://postgres:pw@localhost:5432/flutter_wars"
-uv run alembic upgrade head
-```
-
-Do not run the migration chain with `DATABASE_URL=sqlite://`; the deployment
-migrations target PostgreSQL. SQLite remains available only for the automated
-unit-test fixtures.
-
-To inspect or roll back the latest revision:
-
-```powershell
-uv run alembic current
-uv run alembic downgrade -1
-```
-
-For deployment, set `DATABASE_URL` to the provider-supplied Cloudflare Hyperdrive route to Neon; no provider-specific adapter is hard-coded here.
-
-## Run and test
-
-```powershell
+```bash
+cd server
+uv sync
+cp .env.example .env            # then fill in the values (see below)
+uv run alembic upgrade head     # one migration history for every module
+uv run python -m app.modules.admin.cli add-owner --email you@example.com --name "Event Lead"
 uv run uvicorn app.main:app --reload
-uv run pytest
-uv run ruff check .
-uv run alembic upgrade head
 ```
 
-`GET /health` returns `{"status":"ok"}` for process liveness. `GET /ready` verifies the configured database path and returns `{"status":"ready"}` or a safe `503` error.
+Settings come from the environment (or `.env`); see `.env.example` and
+[docs/environment-reference.md](docs/environment-reference.md).
 
-`JWT_SECRET_KEY` is required for Module B. Generate a unique high-entropy value
-for each environment. `GOOGLE_OAUTH_CLIENT_ID` must be set in production so
-Google ID tokens are verified for this backend's client ID. Run authentication
-and synchronization tests with `uv run pytest tests/test_authentication.py tests/test_ide_sync.py`.
+## Tests
+
+All suites use real PostgreSQL (locks, CHECKs, triggers and partial indexes must be real):
+
+| Directory | Covers | Database |
+|---|---|---|
+| `tests/foundation/` | A, B, C | `TEST_DATABASE_URL` (migrated schema) |
+| `tests/owners/` | D, E, F, K | `TEST_DATABASE_URL` |
+| `tests/market/` | G, H, I, J, M | `MODULES_TEST_DATABASE_URL` (`*_modules_test`) |
+| `tests/e2e/` | the whole app over HTTP with real JWTs | `TEST_DATABASE_URL` |
+
+```bash
+docker run -d --name pg -e POSTGRES_PASSWORD=pw -p 5432:5432 postgres:17
+for db in flutterwars_test flutter_modules_test flutter_migration_test; do
+  docker exec pg psql -U postgres -c "CREATE DATABASE $db"; done
+TEST_DATABASE_URL=postgresql+psycopg://postgres:pw@localhost:5432/flutterwars_test \
+MODULES_TEST_DATABASE_URL=postgresql+psycopg://postgres:pw@localhost:5432/flutter_modules_test \
+MIGRATION_DATABASE_URL=postgresql+psycopg://postgres:pw@localhost:5432/flutter_migration_test \
+uv run pytest
+```
+
+Every database named here is wiped by the tests: never point them at a real one.
+
+## Deploy (Cloudflare)
+
+The Worker (`cloudflare/`) builds the app on its first request from its vars, secrets
+and the `HYPERDRIVE` binding (pg8000, NullPool). Fill in the placeholders in
+`cloudflare/wrangler.jsonc` (or keep your own git-ignored `wrangler.local.jsonc`), set
+the secrets, migrate, then deploy:
+
+```bash
+cd server/cloudflare
+npx wrangler secret put JWT_SECRET_KEY
+npx wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET
+(cd .. && DATABASE_URL=<Neon direct URL> uv run alembic upgrade head)
+npm ci && uv sync && ./build.sh && uv run pywrangler deploy
+```
+
+See [docs/deployment.md](docs/deployment.md) for the Hyperdrive setup (Neon's direct
+host, caching disabled) and the gated GitHub deploy workflow.
 
 ## OAuth and JWT setup
 
@@ -140,31 +175,3 @@ X-Team-API-Key: <team-api-key>
 
 Do not use participant JWTs for `GET /ide/state`, and do not use team API keys
 for participant marketplace or account APIs.
-
-## Structure
-
-- `app/core`: settings, database lifecycle, error mapping, logging hooks, principal boundary.
-- `app/contracts`: stable public shared contracts.
-- `app/modules/foundation`: health/readiness router only.
-- `tests`: Foundation contract tests.
-
-Future modules expose an `APIRouter` and add it explicitly in `app/modules/__init__.py`. For example:
-
-```python
-router = APIRouter(prefix="/example")
-
-
-@router.get("/")
-def example():
-    return {"status": "ok"}
-```
-
-See [docs/module-a.md](docs/module-a.md) for integration boundaries.
-
-## Module C IDE synchronization
-
-Module C adds organizer-managed team API keys and `GET /ide/state`. The IDE must send `X-Team-API-Key`; this is a separate credential from participant JWTs. See [docs/module-c.md](docs/module-c.md) for endpoint details, integration boundaries, and the local fake-inventory test setup. Run its coverage with `uv run pytest tests/test_ide_sync.py`.
-
-## Module B authentication
-
-`POST /auth/google` verifies a Google ID token, resolves the registered identity's current team membership, and issues a participant JWT. `GET /auth/me` requires `Authorization: Bearer <jwt>` and returns the current server-resolved principal. See [docs/module-b.md](docs/module-b.md).
