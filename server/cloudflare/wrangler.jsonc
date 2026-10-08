@@ -1,0 +1,15 @@
+{
+  "name": "flutter-wars-api",
+  "main": "src/worker.py",
+  // Srijan.guchhait@gmail.com's Account
+  "account_id": "ee4c08f37c3a62fedc87fbd1b8b96ff4",
+  "compatibility_date": "2026-10-07",
+  "compatibility_flags": ["python_workers"],
+  "hyperdrive": [
+    // neonflutterwars -> Neon project "Flutter Wars", branch production, db neondb
+    { "binding": "HYPERDRIVE", "id": "85305d10a6ea4f8cb6e7b50a14faac71" }
+  ],
+  // Non-secret. Credentials live in the Hyperdrive config, never here.
+  "vars": { "APP_ENV": "production" },
+  "observability": { "enabled": true }
+}
