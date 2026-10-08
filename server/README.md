@@ -14,7 +14,7 @@ Python + FastAPI + SQLModel on Neon PostgreSQL (through Cloudflare Hyperdrive), 
 | `app/core/` | A: Foundation, plus the B/K principal | **Placeholder.** One `get_session`, `get_principal`, `AppError` shape and `get_now` for every module (I/J's principal and errors derive from these), plus `/health` and `/ready`. `get_principal` rejects every request until Module B replaces it. |
 | `app/modules/catalog/` | D: Widget Catalog | **Placeholder.** A minimal `widget` table plus `get_widget()`. |
 | `migrations/` | M: Infrastructure | One Alembic chain: `0001` placeholder widget table (D replaces it), `0002` G/H tables, `0003` G auction lots, `0004` I/J tables (runs the reviewed `migrations/0001_modules_i_j.sql`). |
-| `app/infra/` | M: Infrastructure | Infra settings/DB/probe helpers: validated settings, Neon/Hyperdrive connection targets, `/ready` health checks. |
+| `app/infra/`, `cloudflare/` | M: Infrastructure | Infra settings/DB/probe helpers; Worker packaging for `app/main.py:create_app` (pg8000 → Hyperdrive → Neon; local tooling uses psycopg). Single `flutter-wars-api` Worker; cache-disabled primary `HYPERDRIVE`. |
 
 Each module follows the same layout: `models.py` (SQLModel tables), `schemas.py` (API payloads), `service.py` (business rules and the internal contracts for other modules), `router.py` (thin FastAPI routes), plus `repository.py` in market for queries. Modules register in `app/main.py:MODULES`.
 
@@ -38,6 +38,41 @@ TEST_DATABASE_URL=postgresql+psycopg://postgres:pw@localhost:5432/flutter_module
 ```
 
 The suite drops and recreates every table, so never point it at a shared database; the I/J fixtures refuse any database whose name does not end in `_modules_test`.
+
+## Deploy (Cloudflare)
+
+The API runs as a Cloudflare **Python Worker** (`cloudflare/`), reaching Neon through the Hyperdrive binding `HYPERDRIVE`. Live: `https://flutter-wars-api.srijan-guchhait.workers.dev` (`/health`, `/ready`, `/docs`).
+
+```bash
+cd server/cloudflare
+uv sync
+./build.sh                    # copies ../app into src/app (wrangler ignores symlinks)
+uv run pywrangler deploy      # bundles packages and runs `wrangler deploy` via npx
+```
+
+- The Worker uses `pg8000` (pure Python); `psycopg[binary]` has no Pyodide build. SQLAlchemy runs with `NullPool`: a Worker cannot reuse a socket across requests, and Hyperdrive does the pooling.
+- `cf deploy` cannot build Python Workers yet (it wants `cloudflare-py-dev-server`, which is unpublished), hence `pywrangler`.
+- Local run: `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgres://... uv run pywrangler dev`.
+
+### Database migrations
+
+Migrations never run inside the Worker. Run them from a machine or CI against Neon's **direct** (non-pooler) endpoint, after the code that needs them is reviewed and before deploying it:
+
+```bash
+cd server
+export DATABASE_URL="postgresql+psycopg://..."   # from: neon cs production --database-name neondb
+uv run alembic upgrade head
+```
+
+Rehearse on a Neon branch first (`neon branches create`); roll back with `alembic downgrade <rev>` or restore the branch to a point in time.
+
+### Configuration
+
+| Variable | Where | Purpose |
+|---|---|---|
+| `DATABASE_URL` | local, CI, migrations | SQLAlchemy URL (`postgresql+psycopg://...`). Not used in the Worker. |
+| `TEST_DATABASE_URL` | tests | Disposable PostgreSQL database named `*_modules_test`. |
+| `HYPERDRIVE` binding | Worker | Set in `cloudflare/wrangler.jsonc`; credentials live in the Hyperdrive config, never in the repo. |
 
 ## Trading and Auction modules (I, J)
 
