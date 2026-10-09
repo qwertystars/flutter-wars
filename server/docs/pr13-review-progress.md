@@ -13,11 +13,14 @@ The agreed order is service boundaries, performance, then live price delivery. C
 - Batched organizer listing pricing configuration and catalog names.
 - CI boundary checks and a query-count regression test for organizer round detail.
 
-Validation: full PostgreSQL 18 suite passed (444 tests); the subsequently added organizer query-count regression passed separately. Run database tests with `PGTZ=UTC`, as in CI. Ruff and the Cloudflare Worker packaging dry run pass. An existing flaky auction privacy assertion now checks the public response fields instead of searching random UUIDs for the digits of a bid amount.
+- Bounded market/pricing cache with PostgreSQL snapshot freshness checks, transaction bypass, and expiry at quote deadlines.
+- Authenticated per-round Python Durable Object sockets, hibernation, persistent sequences, price alarms, committed-change notifications, and REST fallback.
+- Batched connection membership checks and a local ASGI stream for development.
 
-## Remaining review work
+Validation: all 468 PostgreSQL 18 tests pass with `PGTZ=UTC`, including cache concurrency/rollback, socket authorization, reconnect, and alarm coverage. Ruff and Worker packaging pass. A real local workerd smoke check covers successful and rejected trades, interval alarms, reconnects, round closure, and revoked team access.
 
-1. Short per-isolate cache for market state and pricing, bounded by `valid_until`, with a database version check and invalidation after committed trades, round changes, and organizer pricing edits. Never use cached reads to authorize a mutation or publish uncommitted values.
-2. Python Durable Object WebSocket delivery, one object per round. Authenticate connections, broadcast committed changes, and schedule alarms at `valid_until`. Include `server_time` and `valid_until`; REST remains the fallback. Verify reconnects, alarms, lifecycle changes, and commit/rollback delivery in the Worker runtime.
-3. Existing dynamic supply/demand pricing already evaluates elapsed intervals lazily. Preserve the formula unless the reviewer requests a change.
-4. Once all review work is validated, update PR #13 and staging according to the existing deployment workflow. Posting the reviewer reply still needs the user's approval.
+See [market stream and cache documentation](market-stream.md) for client protocol, limits, and performance tradeoffs. Existing dynamic supply/demand pricing retains its formula.
+
+## Deployment status
+
+Changes target PR #13 on `integration/staging-backend`. Local runtime validation does not deploy to staging or production. The reviewer reply remains unposted pending user approval.

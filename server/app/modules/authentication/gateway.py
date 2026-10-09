@@ -9,10 +9,13 @@ from uuid import UUID
 
 from sqlmodel import Session, col, select
 
+from app.contracts.admin import AdminGateway
 from app.contracts.identity import TeamSummary
 from app.contracts.principal import Principal
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.core.services import gateway
+from app.modules.authentication.jwt import decode_access_token
 from app.modules.authentication.model import Team, TeamMembership, UserIdentity
 from app.modules.authentication.service import AuthenticationService
 
@@ -27,6 +30,41 @@ class IdentityGatewayImpl:
 
     def principal_for_token(self, token: str, settings: Settings) -> Principal:
         return AuthenticationService(self.session, settings).principal_for_token(token)
+
+    def authorized_stream_tokens(self, tokens: list[str], settings: Settings) -> set[str]:
+        claims = {}
+        for token in set(tokens):
+            try:
+                data = decode_access_token(token, settings)
+                user_id, team_id = data.get("sub"), data.get("team_id")
+                if not isinstance(user_id, str) or not isinstance(team_id, (str, type(None))):
+                    continue
+                claims[token] = (int(user_id), UUID(team_id) if team_id is not None else None)
+            except (AppError, ValueError):
+                continue
+        if not claims:
+            return set()
+        rows = self.session.exec(
+            select(UserIdentity.id, UserIdentity.email, TeamMembership.team_id, Team.status)
+            .outerjoin(TeamMembership, TeamMembership.user_identity_id == UserIdentity.id)
+            .outerjoin(Team, Team.id == TeamMembership.team_id)
+            .where(col(UserIdentity.id).in_({user_id for user_id, _ in claims.values()}))
+        ).all()
+        members = {(user_id, team_id) for user_id, _, team_id, status in rows if status == "active"}
+        emails = {user_id: email for user_id, email, _, _ in rows}
+        organizers = {}
+        allowed = set()
+        for token, (user_id, team_id) in claims.items():
+            if team_id is not None:
+                if (user_id, team_id) in members:
+                    allowed.add(token)
+            elif user_id in emails:
+                email = emails[user_id]
+                if email not in organizers:
+                    organizers[email] = gateway(AdminGateway, self.session).is_organizer(email)
+                if organizers[email]:
+                    allowed.add(token)
+        return allowed
 
     def team_exists(self, team_id: UUID) -> bool:
         return self.session.exec(select(Team.id).where(Team.id == team_id)).first() is not None
@@ -58,11 +96,11 @@ class IdentityGatewayImpl:
                 user = UserIdentity(email=email)
                 s.add(user)
                 s.flush()
-            elif s.exec(
-                select(TeamMembership).where(TeamMembership.user_identity_id == user.id)
-            ).first():
+            elif s.exec(select(TeamMembership).where(TeamMembership.user_identity_id == user.id)).first():
                 raise AppError(
-                    "MEMBER_ALREADY_IN_TEAM", "A member already belongs to another team.", 409,
+                    "MEMBER_ALREADY_IN_TEAM",
+                    "A member already belongs to another team.",
+                    409,
                     email=email,
                 )
             s.add(TeamMembership(user_identity_id=user.id, team_id=team.id))

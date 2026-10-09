@@ -25,5 +25,9 @@
     "GOOGLE_OAUTH_CLIENT_ID": "<GOOGLE_OAUTH_CLIENT_ID>",
     "GOOGLE_OAUTH_REDIRECT_URI": "https://<worker-host>/auth/google/callback"
   },
+  "durable_objects": {
+    "bindings": [{ "name": "ROUND_STREAM", "class_name": "RoundStream" }]
+  },
+  "migrations": [{ "tag": "round-stream-v1", "new_sqlite_classes": ["RoundStream"] }],
   "observability": { "enabled": true }
 }

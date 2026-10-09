@@ -10,6 +10,7 @@ from app.core.auth import Principal, get_principal, require_permission
 from app.core.clock import get_now
 from app.core.db import get_session
 from app.core.errors import NotFound
+from app.core.read_cache import market_reads
 from app.core.services import gateway
 from app.modules.market import repository as repo
 from app.modules.market import service
@@ -113,23 +114,31 @@ def market_summary(
     now: datetime = Depends(get_now),
     _: Principal = Depends(get_principal),
 ) -> MarketSummary:
-    market = repo.active_market(session)
-    rnd = service.current_round(session)
-    return MarketSummary(
-        market=MarketOut.model_validate(market, from_attributes=True) if market else None,
-        current_round=_round_out(rnd) if rnd else None,
-        server_time=now,
-    )
+    def load() -> MarketSummary:
+        market = repo.active_market(session)
+        rnd = service.current_round(session)
+        return MarketSummary(
+            market=MarketOut.model_validate(market, from_attributes=True) if market else None,
+            current_round=_round_out(rnd) if rnd else None,
+            server_time=now,
+        )
+    result = market_reads.read(session, "market-summary", now, load)
+    return result.model_copy(update={"server_time": now})
+
 
 
 @router.get("/market/rounds/current", response_model=RoundOut)
 def current_round(
-    session: Session = Depends(get_session), _: Principal = Depends(get_principal)
+    session: Session = Depends(get_session), _: Principal = Depends(get_principal),
+    now: datetime = Depends(get_now),
 ) -> RoundOut:
-    rnd = service.current_round(session)
-    if rnd is None:
-        raise NotFound("NO_CURRENT_ROUND", "No round has started yet.")
-    return _round_out(rnd)
+    def load() -> RoundOut:
+        rnd = service.current_round(session)
+        if rnd is None:
+            raise NotFound("NO_CURRENT_ROUND", "No round has started yet.")
+        return _round_out(rnd)
+    return market_reads.read(session, "current-round", now, load)
+
 
 
 @router.get("/market/listings", response_model=ListingsOut)
@@ -138,11 +147,18 @@ def current_listings(
     now: datetime = Depends(get_now),
     _: Principal = Depends(get_principal),
 ) -> ListingsOut:
-    rnd = service.current_round(session)
-    if rnd is None:
-        return ListingsOut(round=None, listings=[], server_time=now)
-    listings = _listings_out(session, rnd, now, admin_view=False)
-    return ListingsOut(round=_round_out(rnd), listings=listings, server_time=now)
+    def load() -> ListingsOut:
+        rnd = service.current_round(session)
+        if rnd is None:
+            return ListingsOut(round=None, listings=[], server_time=now)
+        listings = _listings_out(session, rnd, now, admin_view=False)
+        return ListingsOut(round=_round_out(rnd), listings=listings, server_time=now)
+    result = market_reads.read(
+        session, "current-listings", now, load,
+        deadlines=lambda result: (item.price.valid_until for item in result.listings if item.price),
+    )
+    return result.model_copy(update={"server_time": now})
+
 
 
 # --- organizer ---

@@ -45,7 +45,7 @@ jobs:
       - run: uv sync --locked
 
       - name: Lint
-        run: uv run ruff check app tests scripts migrations
+        run: uv run ruff check app tests scripts migrations cloudflare/src/worker.py cloudflare/src/round_stream.py
 
       - name: Create disposable databases
         run: |

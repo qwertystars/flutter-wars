@@ -6,11 +6,17 @@ engine is configured first (Module A then reuses it), Module A's Settings are re
 from the bindings, and Module B's Google calls switch to the Workers fetch API.
 """
 
+import logging
 import os
+from urllib.parse import urlparse
+from uuid import UUID
 
 from pyodide.http import pyfetch
+from round_stream import RoundStream
 from sqlalchemy.pool import NullPool
-from workers import WorkerEntrypoint, asgi
+from workers import Response, WorkerEntrypoint, asgi
+
+__all__ = ["Default", "RoundStream"]
 
 # Module A Settings, from wrangler vars and secrets (see wrangler.jsonc / docs/deployment.md).
 SETTINGS = (
@@ -93,9 +99,70 @@ def _build(env):
     return app
 
 
+def get_app(env):
+    global _app
+    if _app is None:
+        _app = _build(env)
+    return _app
+
+
+async def notify_streams(env, path):
+    """Called only after successful mutating handlers have explicitly committed.
+
+    Notification failure cannot turn a committed trade into an HTTP failure. Each
+    connected DO also checks every five seconds, so clients recover missed signals.
+    """
+    try:
+        from app.contracts.market import MarketGateway
+        from app.core.db import session_factory
+        from app.core.services import gateway
+
+        round_ids = set()
+        with session_factory() as session:
+            current = gateway(MarketGateway, session).current_round_id()
+            if current:
+                round_ids.add(current)
+        parts = path.strip("/").split("/")
+        if "rounds" in parts:
+            try:
+                round_ids.add(UUID(parts[parts.index("rounds") + 1]))
+            except (ValueError, IndexError):
+                pass
+        for round_id in round_ids:
+            stub = env.ROUND_STREAM.getByName(str(round_id))
+            await stub.fetch("https://round-stream/refresh", method="POST")
+    except Exception:
+        logging.getLogger("flutterwars.stream").warning("market stream notification failed")
+
+
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
-        global _app
-        if _app is None:
-            _app = _build(self.env)
-        return await asgi.fetch(_app, request, self.env, self.ctx)
+        app = get_app(self.env)
+        path = urlparse(request.url).path
+        if path.startswith("/market/rounds/") and path.endswith("/stream"):
+            if request.method != "GET" or (request.headers.get("Upgrade") or "").lower() != "websocket":
+                return Response("WebSocket upgrade required", status=426)
+            try:
+                round_id = UUID(path.split("/")[-2])
+            except ValueError:
+                return Response("Invalid round", status=400)
+            return await self.env.ROUND_STREAM.getByName(str(round_id)).fetch(request)
+        response = await asgi.fetch(app, request, self.env, self.ctx)
+        if (
+            request.method in ("POST", "PATCH", "DELETE")
+            and 200 <= response.status < 300
+            and not path.endswith("/stream-ticket")
+            and path.startswith(
+                (
+                    "/market",
+                    "/purchases",
+                    "/sales",
+                    "/admin/market",
+                    "/admin/widgets",
+                    "/admin/auctions",
+                    "/admin/teams",
+                )
+            )
+        ):
+            self.ctx.waitUntil(notify_streams(self.env, path))
+        return response

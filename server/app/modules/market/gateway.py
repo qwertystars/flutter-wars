@@ -5,6 +5,7 @@ and Auction, G's error codes are mapped to the marketplace errors they document;
 anything else (for example QUANTITY_LIMIT_EXCEEDED) passes through unchanged.
 """
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -19,6 +20,10 @@ from app.contracts.marketplace_errors import (
     ResaleNotAllowed,
     port_errors,
 )
+from app.contracts.pricing import PricingGateway
+from app.core.errors import NotFound
+from app.core.read_cache import market_reads
+from app.core.services import gateway
 from app.modules.market import service
 from app.modules.market.models import MarketListing, MarketRound
 
@@ -57,6 +62,46 @@ class MarketGatewayImpl:
 
     def status_summary(self) -> dict[str, Any]:
         return service.status_summary(self.session)
+
+    def current_round_id(self) -> UUID | None:
+        rnd = service.current_round(self.session)
+        return rnd.id if rnd else None
+
+    def stream_snapshot(self, round_id: UUID, now: datetime) -> dict[str, Any]:
+        def load() -> dict[str, Any]:
+            rnd = service.get_round(self.session, round_id)
+            if rnd.status == RoundStatus.DRAFT:
+                raise NotFound("ROUND_NOT_FOUND", "Round not found.", round_id=round_id)
+            quotes = gateway(PricingGateway, self.session).quote_many(round_id, now)
+            deadlines = [q.valid_until for q in quotes.values() if q.valid_until is not None]
+            return {
+                "round_id": str(round_id),
+                "status": rnd.status,
+                "version": rnd.version,
+                "server_time": now.isoformat(),
+                "valid_until": min(deadlines).isoformat() if deadlines else None,
+                "listings": [
+                    {
+                        "listing_id": str(q.listing_id),
+                        "price": q.price,
+                        "stock_remaining": q.stock_remaining,
+                        "interval_index": q.interval_index,
+                        "valid_until": q.valid_until.isoformat() if q.valid_until else None,
+                    }
+                    for q in sorted(quotes.values(), key=lambda q: str(q.listing_id))
+                ],
+            }
+
+        result = market_reads.read(
+            self.session,
+            ("round-stream", round_id),
+            now,
+            load,
+            deadlines=lambda payload: (
+                (datetime.fromisoformat(payload["valid_until"]),) if payload["valid_until"] else ()
+            ),
+        )
+        return result | {"server_time": now.isoformat()}
 
     # --- pricing (Module H)
 

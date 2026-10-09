@@ -9,6 +9,7 @@ from app.contracts.market import MarketGateway
 from app.core.auth import Principal, get_principal, require_permission
 from app.core.clock import get_now
 from app.core.db import get_session
+from app.core.read_cache import market_reads
 from app.core.services import gateway
 from app.modules.pricing import service
 from app.modules.pricing.models import ListingPricing, PriceHistory
@@ -35,16 +36,16 @@ def listing_price(
     now: datetime = Depends(get_now),
     _: Principal = Depends(get_principal),
 ) -> PriceQuoteOut:
-    gateway(MarketGateway, session).require_listing(listing_id, visible_only=True)
-    q = service.quote(session, listing_id, now)
+    def load():
+        gateway(MarketGateway, session).require_listing(listing_id, visible_only=True)
+        return service.quote(session, listing_id, now)
+    q = market_reads.read(session, ("listing-price", listing_id), now, load,
+                          deadlines=lambda quote: (quote.valid_until,))
     return PriceQuoteOut(
-        listing_id=q.listing_id,
-        price=q.price,
-        strategy=q.strategy,
-        interval_index=q.interval_index,
-        valid_until=q.valid_until,
-        server_time=now,
+        listing_id=q.listing_id, price=q.price, strategy=q.strategy,
+        interval_index=q.interval_index, valid_until=q.valid_until, server_time=now,
     )
+
 
 
 @admin.get("/pricing-strategies", response_model=list[StrategyOut])

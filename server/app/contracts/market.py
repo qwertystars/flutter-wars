@@ -71,6 +71,12 @@ class MarketGateway(Protocol):
     # --- organizer dashboard (Module K)
     def status_summary(self) -> dict[str, Any]: ...
 
+    def current_round_id(self) -> UUID | None: ...
+
+    def stream_snapshot(self, round_id: UUID, now: datetime) -> dict[str, Any]:
+        """Public round state and price/stock pairs; rejects draft rounds. No writes."""
+        ...
+
     # --- pricing (Module H)
     def require_listing(self, listing_id: UUID, *, visible_only: bool) -> None:
         """404 LISTING_NOT_FOUND unless the listing exists (and, if visible_only, is
