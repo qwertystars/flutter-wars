@@ -4,8 +4,8 @@ RULES (same as Modules E and F):
   1. Functions take the caller's Session, flush only, NEVER commit. The route commits once.
   2. Every organizer mutation writes an admin_action_log row in the SAME transaction,
      so the change and its audit row are saved together or not at all.
-  3. Module K never reads another module's tables. It calls their public contract
-     (app.modules.ledger / app.modules.inventory) or a registered port (see ports.py).
+  3. Module K never reads another module's tables. It calls their gateways
+     (app/contracts/: identity, ledger, inventory, market, trading).
   4. Lock order: operational_control -> market_listing -> team_wallet -> team_widget_inventory.
 """
 
@@ -18,14 +18,17 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
+from app.contracts.identity import IdentityGateway, TeamSummary
+from app.contracts.inventory import InventoryGateway, InventoryItem
+from app.contracts.ledger import LedgerGateway, WalletView
+from app.contracts.market import MarketGateway
+from app.contracts.trading import TradingGateway, TransactionQuery
 from app.core.errors import AppError
-from app.modules import inventory, ledger
-from app.modules.admin import ports
+from app.core.services import gateway
 from app.modules.admin import repository as repo
 from app.modules.admin.authz import OrganizerPrincipal
 from app.modules.admin.errors import (
     ConfirmationRequired,
-    DependencyNotAvailable,
     LastOwner,
     MissingPermission,
     OperationFrozen,
@@ -39,7 +42,6 @@ from app.modules.admin.errors import (
 )
 from app.modules.admin.models import CONTROL_SCOPES, AdminActionLog, Organizer
 from app.modules.admin.permissions import ROLE_PERMISSIONS, AuditAction, Permission, Role
-from app.modules.admin.ports import TeamDirectory, TeamSummary, TransactionQuery
 
 FREEZE_ALL_CONFIRMATION = "FREEZE ALL"
 MAX_IMPORT_TEAMS = 200
@@ -350,21 +352,18 @@ class TeamOverview:
 @dataclass(frozen=True)
 class TeamDetail:
     team: TeamSummary
-    wallet: ledger.WalletView
-    inventory: list[inventory.InventoryItem]
+    wallet: WalletView
+    inventory: list[InventoryItem]
 
 
-def _directory() -> TeamDirectory:
-    d = ports.team_directory()
-    if d is None:
-        raise DependencyNotAvailable("Module B team directory")
-    return d
+def _directory(s: Session) -> IdentityGateway:
+    return gateway(IdentityGateway, s)
 
 
 def _overview(teams: list[TeamSummary], s: Session) -> list[TeamOverview]:
     ids = [t.id for t in teams]
-    wallets = ledger.get_wallets(s, ids)  # 1 query
-    units = inventory.unit_counts(s, ids)  # 1 query
+    wallets = gateway(LedgerGateway, s).get_wallets(ids)  # 1 query
+    units = gateway(InventoryGateway, s).unit_counts(ids)  # 1 query
     return [
         TeamOverview(
             id=t.id,
@@ -381,24 +380,24 @@ def _overview(teams: list[TeamSummary], s: Session) -> list[TeamOverview]:
 
 def list_team_overview(s: Session) -> list[TeamOverview]:
     """Dashboard: every team with credits and units, in 3 queries total however many teams exist."""
-    return _overview(_directory().list_teams(s), s)
+    return _overview(_directory(s).list_teams(), s)
 
 
 def get_team_detail(s: Session, team_id: UUID) -> TeamDetail:
-    team = _directory().get_team(s, team_id)
+    team = _directory(s).get_team(team_id)
     if team is None:
         raise TeamNotFound()
     return TeamDetail(
         team=team,
-        wallet=ledger.get_wallet(s, team_id),
-        inventory=inventory.get_team_inventory(s, team_id, include_zero=False),
+        wallet=gateway(LedgerGateway, s).get_wallet(team_id),
+        inventory=gateway(InventoryGateway, s).get_team_inventory(team_id, include_zero=False),
     )
 
 
 def _create_one(
     s: Session,
     actor: OrganizerPrincipal,
-    d: TeamDirectory,
+    d: IdentityGateway,
     *,
     name: str,
     member_emails: list[str],
@@ -407,11 +406,11 @@ def _create_one(
 ) -> TeamSummary:
     try:
         with s.begin_nested():  # SAVEPOINT: a duplicate-name race becomes a clean 409
-            team = d.create_team(s, name, member_emails)
+            team = d.create_team(name, member_emails)
     except IntegrityError as e:
         raise TeamNameTaken([name]) from e
     if initial_credits > 0:
-        ledger.grant_initial(s, team.id, initial_credits, actor=actor.actor)
+        gateway(LedgerGateway, s).grant_initial(team.id, initial_credits, actor=actor.actor)
     audit(
         s,
         actor,
@@ -434,8 +433,8 @@ def create_team(
     initial_credits: int,
     reason: str,
 ) -> TeamOverview:
-    d = _directory()
-    if d.find_by_name(s, name) is not None:
+    d = _directory(s)
+    if d.find_by_name(name) is not None:
         raise TeamNameTaken([name])
     team = _create_one(
         s, actor, d, name=name, member_emails=member_emails, initial_credits=initial_credits, reason=reason
@@ -452,7 +451,7 @@ def import_teams(
     reason: str,
 ) -> list[TeamOverview]:
     """All-or-nothing: every row is checked before anything is created. Any failure -> nothing saved."""
-    d = _directory()
+    d = _directory(s)
     problems: list[str] = []
     if not teams:
         problems.append("No teams given")
@@ -472,7 +471,7 @@ def import_teams(
     if problems:
         raise TeamImportInvalid(problems)
 
-    taken = [name for name, _ in teams if d.find_by_name(s, name) is not None]
+    taken = [name for name, _ in teams if d.find_by_name(name) is not None]
     if taken:
         raise TeamNameTaken(taken)
 
@@ -486,15 +485,15 @@ def import_teams(
 def set_team_status(
     s: Session, actor: OrganizerPrincipal, team_id: UUID, *, status: str, reason: str, confirm: str | None
 ) -> TeamSummary:
-    d = _directory()
-    team = d.get_team(s, team_id)
+    d = _directory(s)
+    team = d.get_team(team_id)
     if team is None:
         raise TeamNotFound()
     if status == "DISABLED" and confirm != team.name:
         raise ConfirmationRequired(team.name)  # type the team's name to disable it
     if team.status == status:
         return team
-    updated = d.set_status(s, team_id, status)
+    updated = d.set_status(team_id, status)
     audit(
         s,
         actor,
@@ -511,14 +510,10 @@ def set_team_status(
 
 
 def market_status(s: Session) -> dict[str, Any]:
-    fn = ports.market_status_provider()
-    if fn is None:
-        raise DependencyNotAvailable("Module G market")
-    return fn(s)
+    return gateway(MarketGateway, s).status_summary()
 
 
 def transactions(s: Session, *, team_id: UUID | None, limit: int, cursor: str | None) -> dict[str, Any]:
-    fn = ports.transaction_feed()
-    if fn is None:
-        raise DependencyNotAvailable("Module I transactions")
-    return fn(s, TransactionQuery(team_id=team_id, limit=max(1, min(limit, 100)), cursor=cursor))
+    return gateway(TradingGateway, s).transaction_feed(
+        TransactionQuery(team_id=team_id, limit=max(1, min(limit, 100)), cursor=cursor)
+    )

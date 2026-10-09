@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from app.integration.contracts import MAX_CREDITS
+from app.contracts.marketplace import MAX_CREDITS
 
 from .models import AuctionState
 

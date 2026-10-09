@@ -1,17 +1,33 @@
-"""Module K — Organizer/Admin Control Plane. Public contract for every module's admin routes,
-and for Module I (ensure_not_frozen("TRADING")) and Module J (ensure_not_frozen("BIDDING"))."""
+"""Module K — Organizer/Admin Control Plane.
 
-from app.modules.admin.authz import OrganizerPrincipal, require_organizer, require_permission
-from app.modules.admin.permissions import AuditAction, Permission, Role
-from app.modules.admin.service import audit, ensure_not_frozen
+Other modules reach Module K only through AdminGateway (app/contracts/admin.py):
+organizer checks (app.core.auth.require_permission), the audit log and the freeze.
+"""
+
+from fastapi import FastAPI
+
+from app.contracts.admin import AdminGateway, OrganizerPrincipal, Permission, Role
+from app.core.auth import require_organizer, require_permission
+from app.core.services import provide
+from app.modules.admin.gateway import AdminGatewayImpl
+from app.modules.admin.router import public_router, router
+from app.modules.admin.service import ensure_not_frozen
+
+
+def register(app: FastAPI) -> None:
+    provide(AdminGateway, AdminGatewayImpl)
+    app.include_router(public_router)  # /controls
+    app.include_router(router)  # /admin
+
+
+# Compatibility exports for callers of the former public authorization API.
 
 __all__ = [
-    "AuditAction",
+    "register",
     "OrganizerPrincipal",
     "Permission",
     "Role",
-    "audit",
-    "ensure_not_frozen",
     "require_organizer",
     "require_permission",
+    "ensure_not_frozen",
 ]

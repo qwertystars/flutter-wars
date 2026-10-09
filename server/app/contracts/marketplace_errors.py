@@ -1,3 +1,8 @@
+"""Errors Trading (I) and Auction (J) document, and that owner gateways raise to them."""
+
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+
 from app.core.errors import AppError
 
 
@@ -91,3 +96,19 @@ class AuctionNotOpen(BusinessError):
 class BidBelowMinimum(BusinessError):
     code = "BID_BELOW_MINIMUM"
     message = "Bid is below the configured minimum."
+
+
+@contextmanager
+def port_errors(mapping: Mapping[str, Callable[[], BusinessError]]) -> Iterator[None]:
+    """Translate an owner module's error codes into the marketplace errors above.
+
+    Codes not in `mapping` (for example QUANTITY_LIMIT_EXCEEDED) pass through unchanged."""
+    try:
+        yield
+    except BusinessError:
+        raise
+    except AppError as exc:
+        port_error = mapping.get(exc.code)
+        if port_error is None:
+            raise
+        raise port_error() from None

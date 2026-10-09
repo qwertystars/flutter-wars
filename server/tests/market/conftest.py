@@ -19,12 +19,12 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import app.models  # noqa: F401  (registers every table)
 from app.auction.models import Auction, AuctionState
+from app.contracts.marketplace import Adapters
 from app.contracts.principal import Principal
 from app.core.clock import get_now
 from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.principal import get_principal
-from app.integration.contracts import Adapters
 from app.integration.runtime import BackendModules
 from app.main import create_app
 from app.modules.admin import OrganizerPrincipal, Role
@@ -55,7 +55,16 @@ from tests.market.adapters import (
 PG_URL = os.environ.get("MODULES_TEST_DATABASE_URL")
 T0 = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
 # Module D's catalog plus Modules G/H. I/J tables come from the `env` fixtures below.
-GH_TABLES = (Widget, Market, MarketRound, MarketListing, MarketRoundEvent, MarketAuctionLot, ListingPricing, PriceHistory)
+GH_TABLES = (
+    Widget,
+    Market,
+    MarketRound,
+    MarketListing,
+    MarketRoundEvent,
+    MarketAuctionLot,
+    ListingPricing,
+    PriceHistory,
+)
 
 
 def _make_engine() -> Engine:
@@ -267,9 +276,7 @@ class Environment:
     def snapshot(self):
         with self.engine.connect() as c:
             w = c.execute(select(wallets).where(wallets.c.team_id == self.team)).mappings().one()
-            stock = c.execute(
-                select(listings.c.stock).where(listings.c.id == self.listing)
-            ).scalar_one()
+            stock = c.execute(select(listings.c.stock).where(listings.c.id == self.listing)).scalar_one()
             owned = (
                 c.execute(
                     select(inventory.c.quantity).where(
@@ -323,15 +330,11 @@ class Environment:
 
     def other_reserved(self):
         with self.engine.connect() as c:
-            return c.execute(
-                select(wallets.c.reserved).where(wallets.c.team_id == self.other_team)
-            ).scalar_one()
+            return c.execute(select(wallets.c.reserved).where(wallets.c.team_id == self.other_team)).scalar_one()
 
     def settlement_debits(self):
         with self.engine.connect() as c:
-            return c.execute(
-                select(func.count()).select_from(entries).where(entries.c.kind == "AUCTION")
-            ).scalar_one()
+            return c.execute(select(func.count()).select_from(entries).where(entries.c.kind == "AUCTION")).scalar_one()
 
 
 @pytest.fixture

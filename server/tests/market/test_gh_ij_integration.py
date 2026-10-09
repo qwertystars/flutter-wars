@@ -15,14 +15,14 @@ from sqlmodel import Session, SQLModel
 import app.models  # noqa: F401  (registers every table)
 from app.auction.models import Auction
 from app.auction.schemas import AuctionCreate, BidRequest
-from app.integration.contracts import Adapters
-from app.integration.errors import BusinessError
+from app.contracts.marketplace import Adapters
+from app.contracts.marketplace_errors import BusinessError
 from app.integration.runtime import BackendModules
 from app.modules.catalog.models import Widget
 from app.modules.market import service as market
-from app.modules.market.adapter import MarketAdapter, release_unsold_lot
+from app.modules.market.gateway import MarketGatewayImpl as MarketAdapter
 from app.modules.market.models import MarketAuctionLot, MarketListing, RoundKind
-from app.modules.pricing.adapter import PricingAdapter
+from app.modules.pricing.gateway import PricingGatewayImpl as PricingAdapter
 from app.modules.pricing.models import ListingPricing
 from app.trading.schemas import PurchaseRequest, SellRequest
 from tests.market.adapters import (
@@ -37,6 +37,10 @@ from tests.market.adapters import (
 )
 
 
+def release_unsold_lot(session, auction, adapters):
+    MarketAdapter(session).release_auction_lot(auction_id=auction.id)
+
+
 class World:
     def __init__(self, engine, kind: RoundKind, supply=5, price=100):
         self.engine = engine
@@ -44,8 +48,12 @@ class World:
         self.fail_inventory = self.fail_credit = False
         with Session(engine) as s:
             widgets = [
-                Widget(id=f"{name}_{uuid4().hex[:8]}", appdev_key=f"appdev.{name}.{uuid4().hex[:8]}",
-                       display_name=name.title(), category="test")
+                Widget(
+                    id=f"{name}_{uuid4().hex[:8]}",
+                    appdev_key=f"appdev.{name}.{uuid4().hex[:8]}",
+                    display_name=name.title(),
+                    category="test",
+                )
                 for name in ("button", "card")
             ]
             s.add_all(widgets)
@@ -63,9 +71,7 @@ class World:
             market.transition(s, rnd.id, "open", now=datetime.now(UTC), actor="test")
             widget_ids = [w.id for w in widgets]
             self.round, self.widget = rnd.id, widget_ids[0]
-            self.listing, self.infinite = (
-                market.repo.listing_for_widget(s, rnd.id, w).id for w in widget_ids
-            )
+            self.listing, self.infinite = (market.repo.listing_for_widget(s, rnd.id, w).id for w in widget_ids)
             s.commit()
         with engine.begin() as c:
             c.execute(catalog.insert(), [{"id": w} for w in widget_ids])
@@ -100,9 +106,7 @@ class World:
 
     def balance(self, team=None):
         with self.engine.connect() as c:
-            return c.execute(
-                select(wallets.c.balance).where(wallets.c.team_id == (team or self.team))
-            ).scalar_one()
+            return c.execute(select(wallets.c.balance).where(wallets.c.team_id == (team or self.team))).scalar_one()
 
     def owned(self, team=None):
         with self.engine.connect() as c:
@@ -119,17 +123,13 @@ class World:
     def buy(self, quantity=1, listing=None, team=None):
         return self.runtime.purchase(
             team or self.team,
-            PurchaseRequest(
-                listing_id=listing or self.listing, quantity=quantity, idempotency_key=uuid4()
-            ),
+            PurchaseRequest(listing_id=listing or self.listing, quantity=quantity, idempotency_key=uuid4()),
         )
 
     def sell(self, quantity=1, listing=None):
         return self.runtime.sell(
             self.team,
-            SellRequest(
-                listing_id=listing or self.listing, quantity=quantity, idempotency_key=uuid4()
-            ),
+            SellRequest(listing_id=listing or self.listing, quantity=quantity, idempotency_key=uuid4()),
         )
 
     def transition(self, action):

@@ -5,7 +5,7 @@ from sqlmodel import Session
 
 from app.core.db import get_engine
 from app.core.errors import AppError
-from app.modules import inventory
+from app.modules.inventory import service as inventory
 
 
 def _run_parallel(n, fn):

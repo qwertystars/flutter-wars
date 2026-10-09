@@ -1,25 +1,21 @@
 from datetime import UTC, datetime
-from enum import StrEnum
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlmodel import Field, SQLModel
 
+from app.contracts.market import LIVE_STATUSES, RoundKind, RoundStatus
 
-class RoundKind(StrEnum):
-    TRADING = "trading"  # fixed-price purchases through the Transaction Engine (Module I)
-    AUCTION = "auction"  # bidding through the Auction Engine (Module J)
-
-
-class RoundStatus(StrEnum):
-    DRAFT = "draft"
-    OPEN = "open"
-    PAUSED = "paused"
-    CLOSED = "closed"
-    FINALIZED = "finalized"
-
-
-LIVE_STATUSES = (RoundStatus.OPEN, RoundStatus.PAUSED)
+__all__ = [
+    "LIVE_STATUSES",
+    "Market",
+    "MarketAuctionLot",
+    "MarketListing",
+    "MarketRound",
+    "MarketRoundEvent",
+    "RoundKind",
+    "RoundStatus",
+]
 
 
 def _now() -> datetime:

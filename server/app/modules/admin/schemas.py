@@ -7,8 +7,8 @@ from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
+from app.contracts.ledger import MAX_AMOUNT
 from app.modules.admin.permissions import Role
-from app.modules.ledger.models import MAX_AMOUNT
 
 _EMAIL_RE = re.compile(r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$")
 

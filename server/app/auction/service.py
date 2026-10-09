@@ -3,8 +3,8 @@ from uuid import UUID
 
 from sqlmodel import Session
 
-from app.integration.contracts import Adapters
-from app.integration.errors import (
+from app.contracts.marketplace import Adapters
+from app.contracts.marketplace_errors import (
     AuctionNotOpen,
     BidBelowMinimum,
     BidNotIncreasing,
@@ -12,7 +12,7 @@ from app.integration.errors import (
     IdempotencyConflict,
     NotFound,
 )
-from app.integration.transactions import lock_request, require_transaction
+from app.core.transactions import lock_request, require_transaction
 
 from .models import Auction, AuctionResult, AuctionState, Bid, BidReceipt
 from .repository import AuctionRepository
@@ -92,12 +92,8 @@ class AuctionService:
     def bid(self, *, team_id: UUID, auction_id: UUID, request: BidRequest) -> MyBid:
         require_transaction(self._repo.session)
         request = BidRequest.model_validate(request.model_dump())
-        lock_request(
-            self._repo.session, scope=f"bid:{auction_id}:{team_id}:{request.idempotency_key}"
-        )
-        receipt = self._repo.receipt(
-            auction_id=auction_id, team_id=team_id, key=request.idempotency_key
-        )
+        lock_request(self._repo.session, scope=f"bid:{auction_id}:{team_id}:{request.idempotency_key}")
+        receipt = self._repo.receipt(auction_id=auction_id, team_id=team_id, key=request.idempotency_key)
         if receipt:
             if receipt.amount != request.amount:
                 raise IdempotencyConflict()

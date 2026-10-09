@@ -3,9 +3,10 @@ import uuid
 from sqlalchemy import text
 from sqlmodel import Session
 
+from app.contracts.identity import IdentityGateway
 from app.core.db import get_engine
-from app.modules import inventory
-from app.modules.admin import ports
+from app.core.services import override
+from app.modules.inventory import service as inventory
 
 
 def _name(prefix="Team"):
@@ -147,10 +148,6 @@ def test_overview_query_count_does_not_grow_with_teams(client, login, login_orga
 
 def test_without_team_directory_answers_503(client, login, login_organizer):
     login_organizer()
-    saved = ports.team_directory()
-    ports.set_team_directory(None)
-    try:
+    with override(IdentityGateway, None):
         r = client.get("/admin/teams")
         assert r.status_code == 503 and r.json()["error"]["code"] == "DEPENDENCY_NOT_AVAILABLE"
-    finally:
-        ports.set_team_directory(saved)

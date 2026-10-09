@@ -1,1 +1,1 @@
-"""Owner-provided integration contracts shared by Trading and Auction."""
+"""Transaction runtime shared by Trading and Auction; owners register themselves."""

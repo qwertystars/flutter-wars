@@ -1,5 +1,14 @@
 # Owner handoff
 
+## Service boundaries
+
+Each feature registers its own routes and session-bound gateway from its `register(app)` entrypoint. Shared interfaces and read models live in `app/contracts/`; callers resolve them through `app/core/services.py`. `app/modules/__init__.py` only discovers and registers modules. The former central wiring and owner adapters have been removed.
+
+The gateway uses the caller's session and never commits. Trading and auction resolve all owner gateways into the same transaction, retaining round/pricing/account lock order and rollback semantics. Pricing joins its state to Market's published SQL read model in one statement. Organizer listing configuration is loaded in one batch. Catalog, wallet, and inventory organizer routes belong to their respective owner modules and retain their existing paths.
+
+Tests replace gateways using `override(contract, factory)`. `tests/architecture/test_boundaries.py` runs in the normal CI suite and rejects imports of another feature's implementation, including imports from shared core and contracts.
+
+
 The implementations follow Architecture.md's ownership boundaries. That document
 still marks resale eligibility, format, ties, and reservations as TBD; the later
 user decisions finalize finite-only resale and hidden incremental auctions. It
@@ -14,8 +23,8 @@ was left untouched rather than silently changing the team-wide specification.
 | Catalog D | Stable UUID; transactional eligibility/archive validation; historic references retained |
 | Ledger E | Account guards ordered by UUID; whole credits; balance minus ACTIVE reservations; atomic debit/credit/reserve/release/settle; stable business-reference uniqueness |
 | Inventory F | Atomic upsert/add; conditional nonnegative removal; mutation references; same transaction |
-| Market G | **Implemented:** `app/modules/market/adapter.py` (auction allocations are G's `market_auction_lot`). Round then listing/allocation guards; finite/infinite handling; resale destination/provenance; fixed allocated auction lot; shared pause/close policy |
-| Pricing H | **Implemented:** `app/modules/pricing/adapter.py`. One execution unit price per quantity; whole credits; consistent guarded state; record_trade receives completed BUY/SELL effects before commit; repricing/cache/history changes join the same transaction |
+| Market G | **Implemented:** `app/modules/market/gateway.py` (auction allocations are G's `market_auction_lot`). Round then listing/allocation guards; finite/infinite handling; resale destination/provenance; fixed allocated auction lot; shared pause/close policy |
+| Pricing H | **Implemented:** `app/modules/pricing/gateway.py`. One execution unit price per quantity; whole credits; consistent guarded state; record_trade receives completed BUY/SELL effects before commit; repricing/cache/history changes join the same transaction |
 | Admin K | Organizer permissions and mandatory action-audit integration; lifecycle actions call J's service |
 | Observability L | Safe codes and correlation; no bid amounts, bodies, SQL parameters, competitor identities, JWTs or raw exception logging |
 | Infrastructure M | Hyperdrive/Neon/session path; migrations; scheduling; retry/timeout handling; actual Cloudflare runtime compatibility |

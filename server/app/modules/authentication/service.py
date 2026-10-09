@@ -1,31 +1,28 @@
 """Module B identity/team lookup and current-principal validation."""
 
-from collections.abc import Callable
 from uuid import UUID
 
 from sqlmodel import Session, select
 
+from app.contracts.admin import AdminGateway
 from app.contracts.principal import Principal
 from app.core.config import Settings
 from app.core.errors import AppError
+from app.core.services import optional_gateway
 from app.modules.authentication.jwt import decode_access_token
 from app.modules.authentication.model import Team, TeamMembership, UserIdentity
 
 ORGANIZER_ROLE = "organizer"
 
-# Module K registers who is an active organizer (by Google-verified email). Module B
-# only asks; it never reads K's tables. Unset means no organizer-only logins.
-OrganizerLookup = Callable[[Session, str], bool]
-_organizer_lookup: OrganizerLookup | None = None
-
-
-def set_organizer_lookup(lookup: OrganizerLookup | None) -> None:
-    global _organizer_lookup
-    _organizer_lookup = lookup
 
 
 def _is_organizer(session: Session, email: str | None) -> bool:
-    return bool(email) and _organizer_lookup is not None and _organizer_lookup(session, email)
+    """Module K decides who is an active organizer (by Google-verified email). Module B
+    only asks, through K's gateway; without Module K there are no organizer-only logins."""
+    if not email:
+        return False
+    admin = optional_gateway(AdminGateway, session)
+    return admin is not None and admin.is_organizer(email)
 
 
 class AuthenticationService:

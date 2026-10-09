@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.integration.contracts import MAX_CREDITS, PurchaseListing
+from app.contracts.marketplace import MAX_CREDITS, PurchaseListing
 from app.trading.policies import DEFAULT_BROKERAGE, BasisPointsBrokerage, FixedFeeBrokerage
 
 

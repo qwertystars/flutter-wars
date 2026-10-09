@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 from app.core.db import get_engine
 from app.core.errors import AppError
-from app.modules import catalog
+from app.modules.catalog import service as catalog
 
 
 def _run_parallel(n, fn):

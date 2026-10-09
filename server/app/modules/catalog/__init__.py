@@ -1,28 +1,18 @@
-"""Module D — Widget Catalog & Component Registry. Public internal contract for Modules C, F, G, H, I, J, K."""
+"""Module D — Widget Catalog & Component Registry.
 
-from app.modules.catalog.models import Widget, WidgetStatus
-from app.modules.catalog.service import (
-    archive_widget,
-    create_widget,
-    get_widget,
-    get_widgets,
-    list_widgets,
-    require_active_widget,
-    restore_widget,
-    update_widget,
-    widget_exists,
-)
+Other modules reach it only through CatalogGateway (app/contracts/catalog.py).
+"""
 
-__all__ = [
-    "Widget",
-    "WidgetStatus",
-    "archive_widget",
-    "create_widget",
-    "get_widget",
-    "get_widgets",
-    "list_widgets",
-    "require_active_widget",
-    "restore_widget",
-    "update_widget",
-    "widget_exists",
-]
+from fastapi import FastAPI
+
+from app.contracts.catalog import CatalogGateway
+from app.core.services import provide
+from app.modules.catalog.admin_router import router as admin_router
+from app.modules.catalog.gateway import CatalogGatewayImpl
+from app.modules.catalog.router import router
+
+
+def register(app: FastAPI) -> None:
+    provide(CatalogGateway, CatalogGatewayImpl)
+    app.include_router(router)  # /widgets
+    app.include_router(admin_router)  # /admin/widgets

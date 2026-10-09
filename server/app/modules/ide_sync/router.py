@@ -3,22 +3,20 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, status
 from sqlmodel import Session
 
+from app.contracts.admin import OrganizerPrincipal
+from app.contracts.identity import IdentityGateway
+from app.contracts.inventory import InventoryGateway
 from app.core.db import get_db
 from app.core.errors import AppError
-from app.modules.admin import OrganizerPrincipal, ports
+from app.core.services import gateway
 from app.modules.ide_sync.auth import get_api_key_principal, require_organizer
-from app.modules.ide_sync.contracts import InventoryReader, UnconfiguredInventoryReader
 from app.modules.ide_sync.schemas import IdeState, IdeWidgetState, IssuedApiKey, RevokedApiKey
 from app.modules.ide_sync.service import ApiKeyPrincipal, ApiKeyService
 
 router = APIRouter(tags=["ide-sync"])
-
-
-def _inventory_reader(request: Request) -> InventoryReader:
-    return getattr(request.app.state, "inventory_reader", UnconfiguredInventoryReader())
 
 
 @router.post(
@@ -31,8 +29,7 @@ def issue_api_key(
     _: Annotated[OrganizerPrincipal, Depends(require_organizer)],
     session: Annotated[Session, Depends(get_db)] = None,
 ) -> IssuedApiKey:
-    directory = ports.team_directory()
-    if directory is None or directory.get_team(session, team_id) is None:
+    if gateway(IdentityGateway, session).get_team(team_id) is None:
         raise AppError("TEAM_NOT_FOUND", "Team not found.", 404)
     record, plaintext_key = ApiKeyService(session).issue(str(team_id))
     return IssuedApiKey(key_id=record.key_id, api_key=plaintext_key, created_at=record.created_at)
@@ -52,10 +49,10 @@ def revoke_api_key(
 
 @router.get("/ide/state", response_model=IdeState)
 def ide_state(
-    request: Request,
     principal: Annotated[ApiKeyPrincipal, Depends(get_api_key_principal)],
+    session: Annotated[Session, Depends(get_db)] = None,
 ) -> IdeState:
-    widgets = _inventory_reader(request).get_team_inventory(principal.team_id)
+    widgets = gateway(InventoryGateway, session).get_team_inventory(UUID(principal.team_id))
     return IdeState(
         team_id=principal.team_id,
         widgets=[

@@ -1,7 +1,7 @@
 from sqlmodel import Session
 
 from app.core.db import get_engine
-from app.modules import inventory
+from app.modules.inventory import service as inventory
 
 
 def _give(team, widget, qty, ref):

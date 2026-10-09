@@ -4,7 +4,9 @@ import uuid
 
 from sqlalchemy import text
 
-from app.modules import catalog, inventory, ledger
+from app.modules.catalog import service as catalog
+from app.modules.inventory import service as inventory
+from app.modules.ledger import service as ledger
 
 
 def _create(db, **kw):

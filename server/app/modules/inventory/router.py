@@ -1,4 +1,4 @@
-"""Module F HTTP routes (participant side). Organizer routes live in Module K."""
+"""Module F HTTP routes (participant side). Organizer routes are in admin_router.py."""
 
 from dataclasses import asdict
 

@@ -1,7 +1,7 @@
 from sqlmodel import Session
 
 from app.core.db import get_engine
-from app.modules import ledger
+from app.modules.ledger import service as ledger
 
 
 def _fund(team, amount=120):

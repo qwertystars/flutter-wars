@@ -75,8 +75,3 @@ class TeamImportInvalid(AppError):
         super().__init__(
             "TEAM_IMPORT_INVALID", "Nothing was imported; fix these rows first", 422, {"problems": problems}
         )
-
-
-class DependencyNotAvailable(AppError):
-    def __init__(self, module: str) -> None:
-        super().__init__("DEPENDENCY_NOT_AVAILABLE", f"{module} is not connected yet", 503, {"module": module})

@@ -18,8 +18,11 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, func, select, update
 
+from app.contracts.catalog import CatalogGateway
+from app.contracts.market import AuctionOperation
+from app.contracts.pricing import PricingGateway
 from app.core.errors import AppError, Conflict, NotFound
-from app.modules.catalog.service import require_active_widget
+from app.core.services import gateway
 from app.modules.market import repository as repo
 from app.modules.market.models import (
     LIVE_STATUSES,
@@ -31,7 +34,6 @@ from app.modules.market.models import (
     RoundKind,
     RoundStatus,
 )
-from app.modules.pricing import service as pricing
 
 Supply = int | Literal["infinite"]
 Action = Literal["open", "pause", "close", "finalize"]
@@ -237,7 +239,7 @@ def transition(
     elif action == "close":
         # A trade that committed while we waited for the lock may carry a later
         # timestamp than this request; the close must not predate it.
-        latest_trade = pricing.latest_activity(session, listing_ids)
+        latest_trade = gateway(PricingGateway, session).latest_activity(listing_ids)
         values["closed_at"] = max(now, latest_trade) if latest_trade else now
     elif action == "finalize":
         values["finalized_at"] = now
@@ -270,7 +272,7 @@ def transition(
         )
     )
     if first_open:
-        pricing.on_round_opened(session, listing_ids, now)
+        gateway(PricingGateway, session).on_round_opened(listing_ids, now)
     session.flush()
     session.refresh(rnd)
     return rnd
@@ -309,7 +311,7 @@ def _supply_columns(supply: Supply) -> tuple[int | None, int | None]:
 
 def _check_widget(session: Session, widget_id: str) -> None:
     """Module D decides: 404 WIDGET_NOT_FOUND, 409 WIDGET_ARCHIVED."""
-    require_active_widget(session, widget_id)
+    gateway(CatalogGateway, session).require_active_widget(widget_id)
 
 
 def _fresh_listing(session: Session, listing_id: UUID) -> MarketListing:
@@ -359,8 +361,21 @@ def add_listing(session: Session, round_id: UUID, spec: ListingSpec) -> MarketLi
             "This widget is already listed in the round.",
             widget_id=spec.widget_id,
         ) from None
-    pricing.configure_listing(session, listing, spec.pricing_strategy, spec.pricing_params or {})
+    _configure_pricing(session, listing, spec.pricing_strategy, spec.pricing_params or {})
     return listing
+
+
+def _configure_pricing(
+    session: Session, listing: MarketListing, strategy: str, params: dict[str, Any]
+) -> None:
+    """Module H validates and stores the listing's pricing (draft rounds only)."""
+    gateway(PricingGateway, session).configure_listing(
+        listing_id=listing.id,
+        base_price=listing.base_price,
+        infinite_supply=listing.infinite_supply,
+        strategy=strategy,
+        params=params,
+    )
 
 
 _UNSET: Any = object()
@@ -386,19 +401,19 @@ def update_listing(
     if max_per_purchase is not _UNSET:
         listing.max_per_purchase = max_per_purchase
     session.add(listing)
-    current = pricing.get_config(session, listing.id)
+    current = gateway(PricingGateway, session).get_config(listing.id)
     strategy, params = current.strategy, current.params
     if pricing_strategy is not _UNSET and pricing_strategy != strategy:
         strategy, params = pricing_strategy, {}  # old parameters belong to the old strategy
     if pricing_params is not _UNSET:
         params = pricing_params
-    pricing.configure_listing(session, listing, strategy, params)
+    _configure_pricing(session, listing, strategy, params)
     return listing
 
 
 def delete_listing(session: Session, listing_id: UUID) -> None:
     listing = _lock_draft_listing(session, listing_id)
-    pricing.remove_listing(session, listing.id)
+    gateway(PricingGateway, session).remove_listing(listing.id)
     session.flush()  # no ORM relationship, so order the deletes by hand
     session.delete(listing)
 
@@ -513,9 +528,6 @@ def return_stock(session: Session, listing_id: UUID, quantity: int) -> int | Non
 
 
 # --- auction lots: the market side of an Auction Engine (J) auction ---
-
-AuctionOperation = Literal["bid", "settle", "view"]
-
 
 def create_auction_lot(
     session: Session, listing_id: UUID, *, auction_id: UUID, quantity: int

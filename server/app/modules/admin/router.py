@@ -231,7 +231,7 @@ def set_team_status(
     return TeamSummaryOut(**asdict(t))
 
 
-# ---------------------------------------------------------------- market & transactions (read-only, via ports)
+# ---------------------------------------------------------------- market & transactions (read-only, via their gateways)
 
 
 @router.get("/market/status")

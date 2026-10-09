@@ -4,11 +4,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
-from app.core.auth import Principal, get_principal
+from app.contracts.admin import Permission
+from app.contracts.market import MarketGateway
+from app.core.auth import Principal, get_principal, require_permission
 from app.core.clock import get_now
 from app.core.db import get_session
-from app.modules.admin import Permission, require_permission
-from app.modules.market import service as market
+from app.core.services import gateway
 from app.modules.pricing import service
 from app.modules.pricing.models import ListingPricing, PriceHistory
 from app.modules.pricing.schemas import (
@@ -24,9 +25,7 @@ from app.modules.pricing.strategies import available_strategies, get_strategy
 MARKET_MANAGE = require_permission(Permission.MARKET_MANAGE)
 
 router = APIRouter(tags=["pricing"])
-admin = APIRouter(
-    prefix="/admin/market", tags=["pricing admin"], dependencies=[Depends(MARKET_MANAGE)]
-)
+admin = APIRouter(prefix="/admin/market", tags=["pricing admin"], dependencies=[Depends(MARKET_MANAGE)])
 
 
 @router.get("/market/listings/{listing_id}/price", response_model=PriceQuoteOut)
@@ -36,7 +35,7 @@ def listing_price(
     now: datetime = Depends(get_now),
     _: Principal = Depends(get_principal),
 ) -> PriceQuoteOut:
-    market.get_visible_listing(session, listing_id)
+    gateway(MarketGateway, session).require_listing(listing_id, visible_only=True)
     q = service.quote(session, listing_id, now)
     return PriceQuoteOut(
         listing_id=q.listing_id,
@@ -79,9 +78,7 @@ def update_pricing(
     session: Session = Depends(get_session),
     now: datetime = Depends(get_now),
 ) -> PricingConfigOut:
-    state = service.update_pricing(
-        session, listing_id, strategy=body.strategy, params=body.params, now=now
-    )
+    state = service.update_pricing(session, listing_id, strategy=body.strategy, params=body.params, now=now)
     session.commit()
     session.refresh(state)
     return _config_out(state)
@@ -89,5 +86,5 @@ def update_pricing(
 
 @admin.get("/listings/{listing_id}/price-history", response_model=list[PriceHistoryOut])
 def history(listing_id: UUID, session: Session = Depends(get_session)) -> list[PriceHistory]:
-    market.get_listing(session, listing_id)
+    gateway(MarketGateway, session).require_listing(listing_id, visible_only=False)
     return service.price_history(session, listing_id)

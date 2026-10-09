@@ -1,5 +1,5 @@
-"""Module D HTTP routes (participant side). Organizer routes (/admin/widgets...) live in Module K
-(app/modules/admin/catalog_router.py), so every /admin route shares one permission check + audit log."""
+"""Module D HTTP routes (participant side). Organizer routes (/admin/widgets...) are in
+admin_router.py, with Module K's permission check and audit log."""
 
 from fastapi import APIRouter, Depends, Path
 from sqlmodel import Session

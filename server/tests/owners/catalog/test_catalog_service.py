@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from app.modules import catalog
+from app.modules.catalog import service as catalog
 from app.modules.catalog.errors import (
     FieldImmutable,
     InvalidWidgetData,

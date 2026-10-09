@@ -5,9 +5,9 @@ import pytest
 from sqlmodel import Session
 
 from app.core.db import get_engine
-from app.modules import ledger
 from app.modules.admin import ensure_not_frozen, service
 from app.modules.admin.errors import OperationFrozen
+from app.modules.ledger import service as ledger
 
 
 def _fund(team, amount=120):

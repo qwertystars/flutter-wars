@@ -7,13 +7,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select
 
-from app.modules.authentication.model import Team
 from app.modules.ledger.errors import DuplicateReference
 from app.modules.ledger.models import CreditLedgerEntry, CreditReservation, TeamWallet
-
-
-def team_exists(s: Session, team_id: UUID) -> bool:
-    return s.exec(select(Team.id).where(Team.id == team_id)).first() is not None
 
 
 def get_wallet(s: Session, team_id: UUID) -> TeamWallet | None:

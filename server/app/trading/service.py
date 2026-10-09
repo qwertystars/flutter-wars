@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from app.integration.contracts import (
+from app.contracts.marketplace import (
     MAX_CREDITS,
     BrokeragePolicy,
     CatalogPort,
@@ -9,8 +9,8 @@ from app.integration.contracts import (
     MarketPort,
     PricingPort,
 )
-from app.integration.errors import ConfigurationRequired, NotFound
-from app.integration.transactions import lock_request, require_transaction
+from app.contracts.marketplace_errors import ConfigurationRequired, NotFound
+from app.core.transactions import lock_request, require_transaction
 
 from .errors import AmountTooLarge, IdempotencyConflict, InvalidPrice
 from .models import TradeTransaction, TradeType
@@ -40,21 +40,15 @@ class TradingService:
         self._catalog = catalog
         self._brokerage = brokerage
 
-    def _get_existing(
-        self, *, team_id: UUID, request: PurchaseRequest, kind: TradeType
-    ) -> TradeTransaction | None:
+    def _get_existing(self, *, team_id: UUID, request: PurchaseRequest, kind: TradeType) -> TradeTransaction | None:
         existing = self._trades.get_by_idempotency_key(
             team_id=team_id, transaction_type=kind, idempotency_key=request.idempotency_key
         )
-        if existing and (
-            existing.listing_id != request.listing_id or existing.quantity != request.quantity
-        ):
+        if existing and (existing.listing_id != request.listing_id or existing.quantity != request.quantity):
             raise IdempotencyConflict()
         return existing
 
-    def _get_existing_purchase(
-        self, *, team_id: UUID, request: PurchaseRequest
-    ) -> TradeTransaction | None:
+    def _get_existing_purchase(self, *, team_id: UUID, request: PurchaseRequest) -> TradeTransaction | None:
         return self._get_existing(team_id=team_id, request=request, kind=TradeType.BUY)
 
     def _get_purchase_amounts(self, *, request: PurchaseRequest) -> tuple[int, int]:
@@ -72,14 +66,10 @@ class TradingService:
     def sell(self, *, team_id: UUID, request: SellRequest) -> TradeTransaction:
         return self._trade(team_id=team_id, request=request, kind=TradeType.SELL)
 
-    def _trade(
-        self, *, team_id: UUID, request: PurchaseRequest, kind: TradeType
-    ) -> TradeTransaction:
+    def _trade(self, *, team_id: UUID, request: PurchaseRequest, kind: TradeType) -> TradeTransaction:
         require_transaction(self._trades.session)
         request = PurchaseRequest.model_validate(request.model_dump())
-        lock_request(
-            self._trades.session, scope=f"trade:{team_id}:{kind.value}:{request.idempotency_key}"
-        )
+        lock_request(self._trades.session, scope=f"trade:{team_id}:{kind.value}:{request.idempotency_key}")
         existing = self._get_existing(team_id=team_id, request=request, kind=kind)
         if existing:
             return existing
@@ -89,15 +79,11 @@ class TradingService:
             # Serialize this team's resales into one listing, so the prior quantity
             # the brokerage sees cannot be raced by a concurrent split sale.
             lock_request(self._trades.session, scope=f"resale:{team_id}:{request.listing_id}")
-        get_listing = (
-            self._market.get_for_purchase if kind == TradeType.BUY else self._market.get_for_resale
-        )
+        get_listing = self._market.get_for_purchase if kind == TradeType.BUY else self._market.get_for_resale
         listing = get_listing(listing_id=request.listing_id, quantity=request.quantity)
         if listing.listing_id != request.listing_id:
             raise InvalidPrice("Adapter returned mismatched listing identity.")
-        self._catalog.validate_widget(
-            widget_id=listing.widget_id, operation="buy" if kind == TradeType.BUY else "sell"
-        )
+        self._catalog.validate_widget(widget_id=listing.widget_id, operation="buy" if kind == TradeType.BUY else "sell")
         price, gross = self._get_purchase_amounts(request=request)
         fee = 0
         if kind == TradeType.SELL:
@@ -107,9 +93,7 @@ class TradingService:
                 quantity=request.quantity,
                 unit_price=price,
                 gross_amount=gross,
-                prior_quantity=self._trades.sold_quantity(
-                    team_id=team_id, listing_id=listing.listing_id
-                ),
+                prior_quantity=self._trades.sold_quantity(team_id=team_id, listing_id=listing.listing_id),
             )
             if type(fee) is not int or not 0 <= fee <= gross:
                 raise ConfigurationRequired("Brokerage must return a valid whole-credit fee.")
@@ -130,9 +114,7 @@ class TradingService:
         self._ledger.lock_accounts(team_ids=[team_id])
         if kind == TradeType.BUY:
             self._ledger.debit(team_id=team_id, amount=trade.final_amount, trade_id=trade.id)
-            self._market.consume_stock(
-                listing_id=listing.listing_id, quantity=request.quantity, trade_id=trade.id
-            )
+            self._market.consume_stock(listing_id=listing.listing_id, quantity=request.quantity, trade_id=trade.id)
             self._inventory.add(
                 team_id=team_id,
                 widget_id=listing.widget_id,
@@ -146,9 +128,7 @@ class TradingService:
                 quantity=request.quantity,
                 reference=trade.id,
             )
-            self._market.restore_stock(
-                listing_id=listing.listing_id, quantity=request.quantity, trade_id=trade.id
-            )
+            self._market.restore_stock(listing_id=listing.listing_id, quantity=request.quantity, trade_id=trade.id)
             self._ledger.credit(team_id=team_id, amount=trade.final_amount, trade_id=trade.id)
         self._trades.add(trade)
         self._pricing.record_trade(

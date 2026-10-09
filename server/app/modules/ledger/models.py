@@ -19,9 +19,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, SQLModel
 
+from app.contracts.ledger import MAX_AMOUNT
+
 LEDGER_KINDS = ("GRANT", "CREDIT", "DEBIT", "CAPTURE", "ADJUST")
 RESERVATION_STATUSES = ("ACTIVE", "RELEASED", "CAPTURED")
-MAX_AMOUNT = 1_000_000
 
 
 class TeamWallet(SQLModel, table=True):

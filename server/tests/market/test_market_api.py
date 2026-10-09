@@ -106,11 +106,7 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
     listings = {item["widget_id"]: item for item in rnd["listings"]}
     finite, infinite = listings[str(widgets[0].id)], listings[str(widgets[1].id)]
     assert finite["stock_remaining"] == 10 and not finite["infinite_supply"]
-    assert (
-        infinite["infinite_supply"]
-        and infinite["stock_remaining"] is None
-        and infinite["supply_total"] is None
-    )
+    assert infinite["infinite_supply"] and infinite["stock_remaining"] is None and infinite["supply_total"] is None
     assert finite["pricing"]["strategy"] == "static"
 
     # Drafts are invisible to participants.
@@ -180,9 +176,7 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
         (["open", "close", "finalize"], "close"),
     ],
 )
-def test_invalid_transitions_rejected(
-    api: Api, widgets: list[Widget], setup: list[str], action: str
-) -> None:
+def test_invalid_transitions_rejected(api: Api, widgets: list[Widget], setup: list[str], action: str) -> None:
     setup_market(api)
     rnd = create_round(api, widgets)
     for step in setup:
@@ -254,19 +248,12 @@ def test_listing_validation(api: Api, widgets: list[Widget]) -> None:
     assert ok.status_code == 201 and ok.json()["sold_out"] is True
 
     assert (
-        error_code(
-            api.post(url, json={"widget_id": str(widgets[2].id), "base_price": 10, "supply": 5})
-        )
+        error_code(api.post(url, json={"widget_id": str(widgets[2].id), "base_price": 10, "supply": 5}))
         == "DUPLICATE_LISTING"
     )
+    assert error_code(api.post(url, json={"widget_id": MISSING, "base_price": 10, "supply": 5})) == "WIDGET_NOT_FOUND"
     assert (
-        error_code(api.post(url, json={"widget_id": MISSING, "base_price": 10, "supply": 5}))
-        == "WIDGET_NOT_FOUND"
-    )
-    assert (
-        error_code(
-            api.post(url, json={"widget_id": str(widgets[4].id), "base_price": 10, "supply": 5})
-        )
+        error_code(api.post(url, json={"widget_id": str(widgets[4].id), "base_price": 10, "supply": 5}))
         == "WIDGET_ARCHIVED"
     )
     for bad in (
@@ -304,14 +291,8 @@ def test_draft_listing_edit_and_delete(api: Api, widgets: list[Widget]) -> None:
     listing = rnd["listings"][0]
     url = f"/admin/market/listings/{listing['id']}"
 
-    edited = api.patch(
-        url, json={"base_price": 120, "supply": "infinite", "max_per_purchase": 2}
-    ).json()
-    assert (
-        edited["base_price"] == 120
-        and edited["infinite_supply"]
-        and edited["max_per_purchase"] == 2
-    )
+    edited = api.patch(url, json={"base_price": 120, "supply": "infinite", "max_per_purchase": 2}).json()
+    assert edited["base_price"] == 120 and edited["infinite_supply"] and edited["max_per_purchase"] == 2
     assert edited["price"]["amount"] == 120
 
     edited = api.patch(
@@ -319,10 +300,7 @@ def test_draft_listing_edit_and_delete(api: Api, widgets: list[Widget]) -> None:
         json={"supply": 4, "pricing": {"strategy": "dynamic", "params": {"interval_seconds": 60}}},
     ).json()
     assert edited["stock_remaining"] == 4
-    assert (
-        edited["pricing"]["strategy"] == "dynamic"
-        and edited["pricing"]["params"]["interval_seconds"] == 60
-    )
+    assert edited["pricing"]["strategy"] == "dynamic" and edited["pricing"]["params"]["interval_seconds"] == 60
 
     # Changing only the price keeps the dynamic configuration.
     edited = api.patch(url, json={"base_price": 80}).json()
@@ -399,3 +377,37 @@ def test_admin_lists_rounds_and_strategies(api: Api, widgets: list[Widget]) -> N
 
 def test_health(api: Api) -> None:
     assert api.get("/health").json() == {"status": "ok"}
+
+
+def test_organizer_round_queries_do_not_grow_with_listings(api: Api, widgets: list[Widget], engine) -> None:
+    """The organizer view batches catalog and pricing config instead of querying each listing."""
+    from sqlalchemy import event
+
+    setup_market(api)
+    small = create_round(
+        api,
+        widgets,
+        listings=[
+            {"widget_id": widgets[0].id, "base_price": 100, "supply": 10},
+        ],
+    )
+    large = create_round(
+        api, widgets, listings=[{"widget_id": w.id, "base_price": 100, "supply": 10} for w in widgets[:4]]
+    )
+
+    def read_count(round_id):
+        statements = []
+
+        def record(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            response = api.get(f"/admin/market/rounds/{round_id}")
+            assert response.status_code == 200
+            assert all(item["pricing"]["strategy"] == "static" for item in response.json()["listings"])
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        return len(statements)
+
+    assert read_count(small["id"]) == read_count(large["id"])

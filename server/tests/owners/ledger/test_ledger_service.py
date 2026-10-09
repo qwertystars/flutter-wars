@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from app.modules import ledger
+from app.modules.ledger import service as ledger
 from app.modules.ledger.errors import (
     DuplicateReference,
     InsufficientCredits,

@@ -5,8 +5,9 @@ from typing import Annotated
 from fastapi import Depends, Header
 from sqlmodel import Session
 
+from app.contracts.admin import Permission
+from app.core.auth import require_permission
 from app.core.db import get_db
-from app.modules.admin import Permission, require_permission
 from app.modules.ide_sync.service import ApiKeyPrincipal, ApiKeyService
 
 

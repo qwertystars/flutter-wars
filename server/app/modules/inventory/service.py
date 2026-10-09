@@ -1,4 +1,5 @@
-"""Module F business rules — the internal contract used by Modules C, I, J and K.
+"""Module F business rules. Modules C, I, J and K call them through Module F's gateway
+(app/contracts/inventory.py).
 
 RULES FOR CALLERS:
   1. Pass your own Session. These functions NEVER commit; they only flush.
@@ -14,7 +15,10 @@ from uuid import UUID
 
 from sqlmodel import Session
 
-from app.modules import catalog
+from app.contracts.catalog import CatalogGateway
+from app.contracts.identity import IdentityGateway
+from app.contracts.inventory import InventoryItem
+from app.core.services import gateway
 from app.modules.inventory import repository as repo
 from app.modules.inventory.errors import (
     DuplicateReference,
@@ -25,15 +29,6 @@ from app.modules.inventory.errors import (
     WidgetNotFound,
 )
 from app.modules.inventory.models import MAX_QUANTITY_STEP, InventoryEvent
-
-
-@dataclass(frozen=True)
-class InventoryItem:
-    widget_id: str
-    appdev_key: str
-    display_name: str
-    quantity: int
-    archived: bool
 
 
 @dataclass(frozen=True)
@@ -78,7 +73,7 @@ def get_team_inventory(s: Session, team_id: UUID, *, include_zero: bool = False)
     our rows + one batch lookup in the catalog (Module D).
     Archived widgets the team still owns ARE returned, flagged archived=True."""
     rows = repo.list_team_inventory(s, team_id, include_zero)
-    widgets = catalog.get_widgets(s, [r.widget_id for r in rows])
+    widgets = gateway(CatalogGateway, s).get_widgets([r.widget_id for r in rows])
     return [
         InventoryItem(
             widget_id=r.widget_id,
@@ -125,11 +120,11 @@ def _change(
 ) -> InventoryEvent:
     if repo.event_exists(s, team_id, widget_id, ref_type, ref_id, kind):
         raise DuplicateReference(ref_type, ref_id, kind)
-    if not catalog.widget_exists(s, widget_id):
+    if not gateway(CatalogGateway, s).widget_exists(widget_id):
         raise WidgetNotFound(widget_id)
 
     if delta > 0:
-        if not repo.team_exists(s, team_id):
+        if not gateway(IdentityGateway, s).team_exists(team_id):
             raise TeamNotFound()
         new_qty = repo.add_quantity(s, team_id, widget_id, delta)
     else:

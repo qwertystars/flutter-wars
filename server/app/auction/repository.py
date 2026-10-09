@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlalchemy import select as sa_select
 from sqlmodel import Session, select
 
-from app.integration.errors import NotFound
+from app.contracts.marketplace_errors import NotFound
 
 from .models import Auction, AuctionResult, Bid, BidReceipt
 
@@ -24,9 +24,7 @@ class AuctionRepository:
         return item
 
     def own_bid(self, *, auction_id: UUID, team_id: UUID) -> Bid | None:
-        return self.session.exec(
-            select(Bid).where(Bid.auction_id == auction_id, Bid.team_id == team_id)
-        ).one_or_none()
+        return self.session.exec(select(Bid).where(Bid.auction_id == auction_id, Bid.team_id == team_id)).one_or_none()
 
     def receipt(self, *, auction_id: UUID, team_id: UUID, key: UUID) -> BidReceipt | None:
         return self.session.exec(

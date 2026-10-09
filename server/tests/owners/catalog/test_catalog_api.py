@@ -5,7 +5,7 @@ import uuid
 from sqlmodel import Session
 
 from app.core.db import get_engine
-from app.modules import catalog
+from app.modules.catalog import service as catalog
 
 
 def _widget(**kw):

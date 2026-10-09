@@ -4,8 +4,7 @@ import pytest
 from sqlalchemy import text
 
 from app.core.db import get_engine
-from app.modules.admin import audit
-from app.modules.admin.service import _redact
+from app.modules.admin.service import _redact, audit
 
 
 def _audit_for(client, team_id):

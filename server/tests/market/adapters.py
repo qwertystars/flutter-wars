@@ -15,8 +15,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert
 
-from app.integration.contracts import PurchaseListing
-from app.integration.errors import (
+from app.contracts.marketplace import PurchaseListing
+from app.contracts.marketplace_errors import (
     ConfigurationRequired,
     InsufficientCredits,
     InsufficientInventory,
@@ -94,22 +94,14 @@ class MarketAdapter:
         self.session = session
 
     def _listing(self, listing_id):
-        row = (
-            self.session.execute(select(listings).where(listings.c.id == listing_id))
-            .mappings()
-            .one_or_none()
-        )
+        row = self.session.execute(select(listings).where(listings.c.id == listing_id)).mappings().one_or_none()
         if row is None:
             raise InvalidListing()
         state = self.session.execute(
             select(rounds.c.state).where(rounds.c.id == row["round_id"]).with_for_update(read=True)
         ).scalar_one()
         row = (
-            self.session.execute(
-                select(listings).where(listings.c.id == listing_id).with_for_update()
-            )
-            .mappings()
-            .one()
+            self.session.execute(select(listings).where(listings.c.id == listing_id).with_for_update()).mappings().one()
         )
         return row, state
 
@@ -132,11 +124,7 @@ class MarketAdapter:
         return self._trade(listing_id, quantity, True)
 
     def consume_stock(self, *, listing_id, quantity, trade_id):
-        row = (
-            self.session.execute(select(listings).where(listings.c.id == listing_id))
-            .mappings()
-            .one()
-        )
+        row = self.session.execute(select(listings).where(listings.c.id == listing_id)).mappings().one()
         if row["finite"]:
             changed = self.session.execute(
                 update(listings)
@@ -148,9 +136,7 @@ class MarketAdapter:
 
     def restore_stock(self, *, listing_id, quantity, trade_id):
         self.session.execute(
-            update(listings)
-            .where(listings.c.id == listing_id)
-            .values(stock=listings.c.stock + quantity)
+            update(listings).where(listings.c.id == listing_id).values(stock=listings.c.stock + quantity)
         )
 
     def guard_auction(self, *, auction_id, round_id, listing_id, widget_id, quantity, operation):
@@ -160,17 +146,11 @@ class MarketAdapter:
         if operation == "bid" and state != "OPEN":
             raise MarketNotOpen()
         allocation = (
-            self.session.execute(
-                select(allocations).where(allocations.c.auction_id == auction_id).with_for_update()
-            )
+            self.session.execute(select(allocations).where(allocations.c.auction_id == auction_id).with_for_update())
             .mappings()
             .one_or_none()
         )
-        if (
-            allocation is None
-            or allocation["listing_id"] != listing_id
-            or allocation["quantity"] != quantity
-        ):
+        if allocation is None or allocation["listing_id"] != listing_id or allocation["quantity"] != quantity:
             raise ConfigurationRequired()
         if operation == "bid" and allocation["consumed"]:
             raise MarketNotOpen()
@@ -190,9 +170,7 @@ class PricingAdapter:
         self.session = session
 
     def get_unit_price(self, *, listing_id):
-        return self.session.execute(
-            select(listings.c.price).where(listings.c.id == listing_id)
-        ).scalar_one()
+        return self.session.execute(select(listings.c.price).where(listings.c.id == listing_id)).scalar_one()
 
     def record_trade(self, *, listing_id, transaction_type, quantity, unit_price, trade_id):
         # Static strategy fixture: no repricing effect.
@@ -204,12 +182,7 @@ class CatalogAdapter:
         self.session = session
 
     def validate_widget(self, *, widget_id, operation):
-        if (
-            self.session.execute(
-                select(catalog.c.id).where(catalog.c.id == widget_id)
-            ).scalar_one_or_none()
-            is None
-        ):
+        if self.session.execute(select(catalog.c.id).where(catalog.c.id == widget_id)).scalar_one_or_none() is None:
             raise InvalidListing()
 
 
@@ -219,43 +192,29 @@ class LedgerAdapter:
 
     def lock_accounts(self, *, team_ids):
         for team in sorted(set(team_ids), key=str):
-            row = self.session.execute(
-                select(wallets).where(wallets.c.team_id == team).with_for_update()
-            ).one_or_none()
+            row = self.session.execute(select(wallets).where(wallets.c.team_id == team).with_for_update()).one_or_none()
             if row is None:
                 raise InsufficientCredits()
 
     def _wallet(self, team_id):
         self.lock_accounts(team_ids=[team_id])
-        return (
-            self.session.execute(select(wallets).where(wallets.c.team_id == team_id))
-            .mappings()
-            .one()
-        )
+        return self.session.execute(select(wallets).where(wallets.c.team_id == team_id)).mappings().one()
 
     def debit(self, *, team_id, amount, trade_id):
         row = self._wallet(team_id)
         if row["balance"] - row["reserved"] < amount:
             raise InsufficientCredits()
         self.session.execute(
-            update(wallets)
-            .where(wallets.c.team_id == team_id)
-            .values(balance=wallets.c.balance - amount)
+            update(wallets).where(wallets.c.team_id == team_id).values(balance=wallets.c.balance - amount)
         )
-        self.session.execute(
-            entries.insert().values(reference=trade_id, kind="BUY", team_id=team_id, amount=amount)
-        )
+        self.session.execute(entries.insert().values(reference=trade_id, kind="BUY", team_id=team_id, amount=amount))
 
     def credit(self, *, team_id, amount, trade_id):
         self._wallet(team_id)
         self.session.execute(
-            update(wallets)
-            .where(wallets.c.team_id == team_id)
-            .values(balance=wallets.c.balance + amount)
+            update(wallets).where(wallets.c.team_id == team_id).values(balance=wallets.c.balance + amount)
         )
-        self.session.execute(
-            entries.insert().values(reference=trade_id, kind="SELL", team_id=team_id, amount=amount)
-        )
+        self.session.execute(entries.insert().values(reference=trade_id, kind="SELL", team_id=team_id, amount=amount))
         if self.env.fail_credit:
             raise RuntimeError("injected credit failure")
 
@@ -264,9 +223,7 @@ class LedgerAdapter:
         if row["balance"] - row["reserved"] < additional_amount:
             raise InsufficientCredits()
         self.session.execute(
-            update(wallets)
-            .where(wallets.c.team_id == team_id)
-            .values(reserved=wallets.c.reserved + additional_amount)
+            update(wallets).where(wallets.c.team_id == team_id).values(reserved=wallets.c.reserved + additional_amount)
         )
         statement = insert(reservations).values(
             id=reservation_id, team_id=team_id, amount=additional_amount, state="ACTIVE"
@@ -281,9 +238,7 @@ class LedgerAdapter:
     def release(self, *, team_id, reservation_id):
         self._wallet(team_id)
         row = (
-            self.session.execute(
-                select(reservations).where(reservations.c.id == reservation_id).with_for_update()
-            )
+            self.session.execute(select(reservations).where(reservations.c.id == reservation_id).with_for_update())
             .mappings()
             .one()
         )
@@ -292,20 +247,14 @@ class LedgerAdapter:
         if row["state"] != "ACTIVE":
             return
         self.session.execute(
-            update(wallets)
-            .where(wallets.c.team_id == team_id)
-            .values(reserved=wallets.c.reserved - row["amount"])
+            update(wallets).where(wallets.c.team_id == team_id).values(reserved=wallets.c.reserved - row["amount"])
         )
-        self.session.execute(
-            update(reservations).where(reservations.c.id == reservation_id).values(state="RELEASED")
-        )
+        self.session.execute(update(reservations).where(reservations.c.id == reservation_id).values(state="RELEASED"))
 
     def settle(self, *, team_id, reservation_id, amount, reference):
         self._wallet(team_id)
         row = (
-            self.session.execute(
-                select(reservations).where(reservations.c.id == reservation_id).with_for_update()
-            )
+            self.session.execute(select(reservations).where(reservations.c.id == reservation_id).with_for_update())
             .mappings()
             .one()
         )
@@ -320,13 +269,9 @@ class LedgerAdapter:
             .where(wallets.c.team_id == team_id)
             .values(balance=wallets.c.balance - amount, reserved=wallets.c.reserved - amount)
         )
+        self.session.execute(update(reservations).where(reservations.c.id == reservation_id).values(state="SETTLED"))
         self.session.execute(
-            update(reservations).where(reservations.c.id == reservation_id).values(state="SETTLED")
-        )
-        self.session.execute(
-            entries.insert().values(
-                reference=reference, kind="AUCTION", team_id=team_id, amount=amount
-            )
+            entries.insert().values(reference=reference, kind="AUCTION", team_id=team_id, amount=amount)
         )
 
 
@@ -335,9 +280,7 @@ class InventoryAdapter:
         self.session, self.env = session, env
 
     def add(self, *, team_id, widget_id, quantity, reference):
-        statement = insert(inventory).values(
-            team_id=team_id, widget_id=widget_id, quantity=quantity
-        )
+        statement = insert(inventory).values(team_id=team_id, widget_id=widget_id, quantity=quantity)
         self.session.execute(
             statement.on_conflict_do_update(
                 index_elements=[inventory.c.team_id, inventory.c.widget_id],

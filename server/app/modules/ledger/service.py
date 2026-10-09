@@ -1,6 +1,8 @@
 """Module E business rules — the internal contract used by Modules I, J and K.
 
-RULES FOR CALLERS (put these in the integration note):
+Other modules call these through Module E's gateway (app/contracts/ledger.py).
+
+RULES FOR CALLERS:
   1. Pass your own Session. These functions NEVER commit; they only flush.
   2. If any function raises, roll back your whole transaction.
   3. Lock order across modules: operational_control -> market_listing -> team_wallet -> team_widget_inventory.
@@ -13,6 +15,9 @@ from uuid import UUID
 
 from sqlmodel import Session
 
+from app.contracts.identity import IdentityGateway
+from app.contracts.ledger import WalletView
+from app.core.services import gateway
 from app.modules.ledger import repository as repo
 from app.modules.ledger.errors import (
     DuplicateReference,
@@ -26,14 +31,6 @@ from app.modules.ledger.errors import (
     WalletNotFound,
 )
 from app.modules.ledger.models import MAX_AMOUNT, CreditLedgerEntry, CreditReservation
-
-
-@dataclass(frozen=True)
-class WalletView:
-    team_id: UUID
-    balance: int
-    held: int
-    available: int
 
 
 @dataclass(frozen=True)
@@ -134,7 +131,7 @@ def _apply(
         raise DuplicateReference(ref_type, ref_id, kind)
 
     if delta > 0:
-        if not repo.team_exists(s, team_id):
+        if not gateway(IdentityGateway, s).team_exists(team_id):
             raise TeamNotFound()
         repo.ensure_wallet(s, team_id)
         new_balance = repo.add_to_balance(s, team_id, delta)

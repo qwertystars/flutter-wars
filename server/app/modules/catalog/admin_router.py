@@ -1,19 +1,20 @@
-"""Module K: organizer routes for the widget catalog (Module D).
+"""Module D: organizer routes for the widget catalog.
 
 Same paths as spec §6 (POST /admin/widgets, PATCH /admin/widgets/{id}, POST .../archive), plus
 GET (organizer view incl. archived + notes) and POST .../restore (undo an accidental archive).
-Every change: permission check -> Module D's rules -> audit row -> one commit.
+Every change: permission check (Module K) -> Module D's rules -> audit row (through
+Module K's gateway) -> one commit.
 """
 
 from fastapi import APIRouter, Depends, Path, Query
 from sqlmodel import Session
 
+from app.contracts.admin import AuditAction, OrganizerPrincipal, Permission
+from app.core.audit import audit
+from app.core.auth import require_permission
 from app.core.db import get_db
-from app.modules import catalog
-from app.modules.admin.authz import OrganizerPrincipal, require_permission
-from app.modules.admin.errors import ConfirmationRequired
-from app.modules.admin.permissions import AuditAction, Permission
-from app.modules.admin.service import audit
+from app.modules.catalog import service as catalog
+from app.modules.catalog.errors import ConfirmationRequired
 from app.modules.catalog.models import WIDGET_ID_PATTERN
 from app.modules.catalog.schemas import (
     WidgetAdminOut,

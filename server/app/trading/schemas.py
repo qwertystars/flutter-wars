@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.integration.contracts import MAX_CREDITS
+from app.contracts.marketplace import MAX_CREDITS
 
 from .models import TradeType
 

@@ -44,3 +44,10 @@ class VersionConflict(AppError):
 class InvalidWidgetData(AppError):
     def __init__(self, message: str) -> None:
         super().__init__("INVALID_WIDGET_DATA", message, 422)
+
+
+class ConfirmationRequired(AppError):
+    def __init__(self, expected: str) -> None:
+        super().__init__(
+            "CONFIRMATION_REQUIRED", "Type the confirmation text exactly to continue", 422, {"expected": expected}
+        )

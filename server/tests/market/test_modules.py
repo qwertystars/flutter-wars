@@ -37,9 +37,7 @@ def sell(env, *, quantity=1, key=None):
 
 
 def bid(env, amount, *, team=None, key=None):
-    return env.runtime.bid(
-        team or env.team, env.auction, BidRequest(amount=amount, idempotency_key=key or uuid4())
-    )
+    return env.runtime.bid(team or env.team, env.auction, BidRequest(amount=amount, idempotency_key=key or uuid4()))
 
 
 def test_purchase_records_server_price_and_all_effects(env):
@@ -73,9 +71,7 @@ def test_round_rejects_purchase(env, state):
 
 def test_invalid_listing(env):
     with pytest.raises(InvalidListing):
-        env.runtime.purchase(
-            env.team, PurchaseRequest(listing_id=uuid4(), quantity=1, idempotency_key=uuid4())
-        )
+        env.runtime.purchase(env.team, PurchaseRequest(listing_id=uuid4(), quantity=1, idempotency_key=uuid4()))
 
 
 def test_stock_failure(env):
@@ -356,7 +352,7 @@ def test_settle_before_deadline_rejected(env):
 def test_purchase_ignores_forged_adapter_price_type(env):
     from dataclasses import replace
 
-    from app.integration.errors import AmountTooLarge, InvalidPrice
+    from app.contracts.marketplace_errors import AmountTooLarge, InvalidPrice
     from tests.market.adapters import PricingAdapter
 
     original = env.adapters
@@ -401,7 +397,7 @@ def test_auction_only_listing_cannot_be_purchased(env):
 
 
 def test_auction_minimum_and_no_bid_policy_are_explicit(env):
-    from app.integration.errors import BidBelowMinimum
+    from app.contracts.marketplace_errors import BidBelowMinimum
 
     env.change(Auction.__table__, Auction.id == env.auction, minimum_bid=100)
     with pytest.raises(BidBelowMinimum):
@@ -433,9 +429,7 @@ def test_bid_waiting_for_account_is_rejected_at_deadline(env):
     env.runtime.adapter_factory = lambda s: replace(original(s), ledger=ObservedLedger(s, env))
     with env.engine.begin() as c:
         c.execute(
-            text(
-                "UPDATE auction SET closes_at = clock_timestamp() + interval '0.25 seconds' WHERE id=:id"
-            ),
+            text("UPDATE auction SET closes_at = clock_timestamp() + interval '0.25 seconds' WHERE id=:id"),
             {"id": env.auction},
         )
     with env.engine.connect() as c:
@@ -471,9 +465,7 @@ def test_bid_and_settlement_share_auction_guard(env):
     env.runtime.adapter_factory = lambda s: replace(original(s), ledger=ObservedLedger(s, env))
     with env.engine.begin() as c:
         c.execute(
-            text(
-                "UPDATE auction SET closes_at = clock_timestamp() + interval '0.25 seconds' WHERE id=:id"
-            ),
+            text("UPDATE auction SET closes_at = clock_timestamp() + interval '0.25 seconds' WHERE id=:id"),
             {"id": env.auction},
         )
     with env.engine.connect() as c:
@@ -510,9 +502,7 @@ def test_services_require_transaction(env):
         with pytest.raises(RuntimeError, match="transaction"):
             env.runtime._trading(s).purchase(
                 team_id=env.team,
-                request=PurchaseRequest(
-                    listing_id=env.listing, quantity=1, idempotency_key=uuid4()
-                ),
+                request=PurchaseRequest(listing_id=env.listing, quantity=1, idempotency_key=uuid4()),
             )
 
 
@@ -523,9 +513,7 @@ def test_adapter_session_mismatch_rejected(env):
 
     original = env.adapters
     with Session(env.engine) as other:
-        env.runtime.adapter_factory = lambda s: replace(
-            original(s), pricing=original(other).pricing
-        )
+        env.runtime.adapter_factory = lambda s: replace(original(s), pricing=original(other).pricing)
         with pytest.raises(ValueError, match="shared session"):
             buy(env)
 
@@ -724,9 +712,7 @@ def test_pricing_effect_failure_rolls_back_trade_and_repricing(env):
 
     class FailingPriceEffects(PricingAdapter):
         def record_trade(self, **kwargs):
-            self.session.execute(
-                update(listings).where(listings.c.id == kwargs["listing_id"]).values(price=101)
-            )
+            self.session.execute(update(listings).where(listings.c.id == kwargs["listing_id"]).values(price=101))
             raise RuntimeError("injected pricing effect failure")
 
     env.runtime.adapter_factory = lambda s: replace(original(s), pricing=FailingPriceEffects(s))
@@ -735,7 +721,4 @@ def test_pricing_effect_failure_rolls_back_trade_and_repricing(env):
         buy(env)
     assert env.snapshot() == before
     with env.engine.connect() as c:
-        assert (
-            c.execute(select(listings.c.price).where(listings.c.id == env.listing)).scalar_one()
-            == 100
-        )
+        assert c.execute(select(listings.c.price).where(listings.c.id == env.listing)).scalar_one() == 100

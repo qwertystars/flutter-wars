@@ -1,17 +1,18 @@
 from collections.abc import Callable
 from uuid import UUID
 
+from fastapi import Request
 from sqlmodel import Session
 
 from app.auction.repository import AuctionRepository
 from app.auction.schemas import AuctionCreate, AuctionView, BidRequest, MyBid, SettlementResponse
 from app.auction.service import AuctionService, NoBidHandler
+from app.contracts.marketplace import Adapters, BrokeragePolicy
+from app.contracts.marketplace_errors import ConfigurationRequired
 from app.trading.policies import DEFAULT_BROKERAGE
 from app.trading.repository import TradeRepository
 from app.trading.schemas import PurchaseRequest, SellRequest, TradeResponse
 from app.trading.service import TradingService
-
-from .contracts import Adapters, BrokeragePolicy
 
 
 class BackendModules:
@@ -66,17 +67,13 @@ class BackendModules:
     def purchase(self, team_id: UUID, request: PurchaseRequest) -> TradeResponse:
         with self.session_factory() as session, session.begin():
             self._check_open(session, "TRADING")
-            result = TradeResponse.model_validate(
-                self._trading(session).purchase(team_id=team_id, request=request)
-            )
+            result = TradeResponse.model_validate(self._trading(session).purchase(team_id=team_id, request=request))
         return result
 
     def sell(self, team_id: UUID, request: SellRequest) -> TradeResponse:
         with self.session_factory() as session, session.begin():
             self._check_open(session, "TRADING")
-            result = TradeResponse.model_validate(
-                self._trading(session).sell(team_id=team_id, request=request)
-            )
+            result = TradeResponse.model_validate(self._trading(session).sell(team_id=team_id, request=request))
         return result
 
     def history(self, team_id: UUID, *, limit: int = 50, offset: int = 0) -> list[TradeResponse]:
@@ -89,17 +86,13 @@ class BackendModules:
 
     def trade_detail(self, team_id: UUID, trade_id: UUID) -> TradeResponse:
         with self.session_factory() as session, session.begin():
-            result = TradeResponse.model_validate(
-                self._trading(session).detail(team_id=team_id, trade_id=trade_id)
-            )
+            result = TradeResponse.model_validate(self._trading(session).detail(team_id=team_id, trade_id=trade_id))
         return result
 
     def bid(self, team_id: UUID, auction_id: UUID, request: BidRequest) -> MyBid:
         with self.session_factory() as session, session.begin():
             self._check_open(session, "BIDDING")
-            result = self._auction(session).bid(
-                team_id=team_id, auction_id=auction_id, request=request
-            )
+            result = self._auction(session).bid(team_id=team_id, auction_id=auction_id, request=request)
         return result
 
     def settle(self, auction_id: UUID) -> SettlementResponse:
@@ -122,9 +115,7 @@ class BackendModules:
             result = AuctionView.model_validate(self._auction(session).create(request))
         return result
 
-    def auction_transition(
-        self, auction_id: UUID, action: str, *, amount: int | None = None
-    ) -> AuctionView:
+    def auction_transition(self, auction_id: UUID, action: str, *, amount: int | None = None) -> AuctionView:
         with self.session_factory() as session, session.begin():
             service = self._auction(session)
             if action == "open":
@@ -137,3 +128,10 @@ class BackendModules:
                 raise ValueError("Unsupported auction action.")
             result = AuctionView.model_validate(auction)
         return result
+
+
+def get_runtime(request: Request) -> BackendModules:
+    runtime = getattr(request.app.state, "backend_runtime", None)
+    if runtime is None:
+        raise ConfigurationRequired()
+    return runtime

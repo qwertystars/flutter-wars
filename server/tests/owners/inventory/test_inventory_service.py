@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from app.modules import inventory, ledger
+from app.modules.inventory import service as inventory
 from app.modules.inventory.errors import (
     DuplicateReference,
     InsufficientQuantity,
@@ -12,6 +12,7 @@ from app.modules.inventory.errors import (
     TeamNotFound,
     WidgetNotFound,
 )
+from app.modules.ledger import service as ledger
 
 
 def _inc(db, t, w, q=1, ref="p-1"):

@@ -4,11 +4,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
-from app.core.auth import Principal, get_principal
+from app.contracts.admin import OrganizerPrincipal, Permission
+from app.contracts.pricing import PricingGateway
+from app.core.auth import Principal, get_principal, require_permission
 from app.core.clock import get_now
 from app.core.db import get_session
 from app.core.errors import NotFound
-from app.modules.admin import OrganizerPrincipal, Permission, require_permission
+from app.core.services import gateway
 from app.modules.market import repository as repo
 from app.modules.market import service
 from app.modules.market.models import Market, MarketAuctionLot, MarketListing, MarketRound
@@ -32,7 +34,6 @@ from app.modules.market.schemas import (
     RoundOut,
     TransitionIn,
 )
-from app.modules.pricing import service as pricing
 
 # Module K decides who is an organizer and what they may do.
 MARKET_MANAGE = require_permission(Permission.MARKET_MANAGE)
@@ -52,12 +53,14 @@ def _listings_out(
 ) -> list[ListingOut]:
     listings = service.listings_for_round(session, rnd.id)
     names = repo.widget_names(session, [listing.widget_id for listing in listings])
-    quotes = pricing.quote_many(
-        session, rnd.id, now
-    )  # refreshes `listings` to the quotes' snapshot
+    prices = gateway(PricingGateway, session)
+    # Each quote carries the stock it was computed from, so price and stock agree.
+    quotes = prices.quote_many(rnd.id, now)
+    configs = prices.get_configs([listing.id for listing in listings]) if admin_view else {}
     out: list[ListingOut] = []
     for listing in listings:
         q = quotes.get(listing.id)
+        stock = q.stock_remaining if q else listing.stock_remaining
         fields = dict(
             id=listing.id,
             round_id=listing.round_id,
@@ -66,8 +69,8 @@ def _listings_out(
             base_price=listing.base_price,
             infinite_supply=listing.infinite_supply,
             supply_total=listing.supply_total,
-            stock_remaining=listing.stock_remaining,
-            sold_out=listing.stock_remaining == 0,
+            stock_remaining=stock,
+            sold_out=stock == 0,
             max_per_purchase=listing.max_per_purchase,
             price=PriceOut(
                 amount=q.price,
@@ -79,7 +82,7 @@ def _listings_out(
             else None,
         )
         if admin_view:
-            config = pricing.get_config(session, listing.id)
+            config = configs[listing.id]
             out.append(
                 ListingAdminOut(
                     **fields,
@@ -96,9 +99,7 @@ def _listings_out(
 
 
 def _round_detail(session: Session, rnd: MarketRound, now: datetime) -> RoundDetailOut:
-    listings = _listings_out(
-        session, rnd, now, admin_view=True
-    )  # refreshes `rnd` to the quotes' snapshot
+    listings = _listings_out(session, rnd, now, admin_view=True)
     base = RoundAdminOut.model_validate(rnd, from_attributes=True)
     return RoundDetailOut(**base.model_dump(), listings=listings)
 
@@ -140,9 +141,7 @@ def current_listings(
     rnd = service.current_round(session)
     if rnd is None:
         return ListingsOut(round=None, listings=[], server_time=now)
-    listings = _listings_out(
-        session, rnd, now, admin_view=False
-    )  # refreshes `rnd` to the quotes' snapshot
+    listings = _listings_out(session, rnd, now, admin_view=False)
     return ListingsOut(round=_round_out(rnd), listings=listings, server_time=now)
 
 

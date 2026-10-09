@@ -1,7 +1,7 @@
 """Module E HTTP routes (participant side). Thin: auth + validation + one service call.
 
-Organizer routes for wallets live in Module K (app/modules/admin/team_assets_router.py),
-because K owns all of /admin: permission checks + audit log in one place."""
+Organizer routes for wallets are in admin_router.py, with Module K's permission check
+and audit log."""
 
 from dataclasses import asdict
 

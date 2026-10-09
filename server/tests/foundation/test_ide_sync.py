@@ -3,14 +3,16 @@ from uuid import uuid4
 from fastapi import status
 from sqlmodel import Session
 
+from app.contracts.inventory import InventoryGateway
+from app.contracts.inventory import InventoryItem as WidgetAllowance
 from app.contracts.principal import Principal
+from app.core.auth import require_organizer
 from app.core.db import get_engine
 from app.core.principal import get_principal
+from app.core.services import override, provide
 from app.modules.admin import OrganizerPrincipal, Role
-from app.modules.admin.authz import require_organizer
 from app.modules.admin.permissions import ROLE_PERMISSIONS
 from app.modules.authentication.model import Team
-from app.modules.ide_sync.contracts import UnconfiguredInventoryReader, WidgetAllowance
 from app.modules.ide_sync.model import TeamApiKey
 
 
@@ -19,8 +21,13 @@ class FakeInventory:
         self.calls: list[str] = []
 
     def get_team_inventory(self, team_id: str) -> list[WidgetAllowance]:
+        team_id = str(team_id)
         self.calls.append(team_id)
-        return [WidgetAllowance(widget_id=f"button_{team_id}", quantity=3)]
+        return [
+            WidgetAllowance(
+                widget_id=f"button_{team_id}", quantity=3, appdev_key="button", display_name="Button", archived=False
+            )
+        ]
 
 
 def _team() -> str:
@@ -49,7 +56,7 @@ def _participant() -> Principal:
 
 def _prepare(app) -> FakeInventory:
     inventory = FakeInventory()
-    app.state.inventory_reader = inventory
+    provide(InventoryGateway, lambda session: inventory)
     app.dependency_overrides[require_organizer] = _organizer
     return inventory
 
@@ -67,14 +74,14 @@ def test_organizer_issues_once_only_key_and_ide_state_is_team_scoped(app, client
     assert issued["api_key"].startswith("twk_")
 
     with get_engine().connect() as connection:
-        stored_hash = connection.execute(
-            TeamApiKey.__table__.select().where(TeamApiKey.key_id == issued["key_id"])
-        ).mappings().one()["secret_hash"]
+        stored_hash = (
+            connection.execute(TeamApiKey.__table__.select().where(TeamApiKey.key_id == issued["key_id"]))
+            .mappings()
+            .one()["secret_hash"]
+        )
     assert issued["api_key"] not in stored_hash
 
-    response = client.get(
-        f"/ide/state?team_id={team_b}", headers={"X-Team-API-Key": issued["api_key"]}
-    )
+    response = client.get(f"/ide/state?team_id={team_b}", headers={"X-Team-API-Key": issued["api_key"]})
     assert response.status_code == 200
     assert response.json() == {
         "team_id": team_a,
@@ -109,13 +116,8 @@ def test_participant_cannot_manage_keys(app, client):
 
 def test_unconfigured_inventory_is_a_safe_dependency_failure(app, client):
     _prepare(app)
-    app.state.inventory_reader = UnconfiguredInventoryReader()
     issued = _issue(client, _team())
-    response = client.get("/ide/state", headers={"X-Team-API-Key": issued["api_key"]})
+    with override(InventoryGateway, None):
+        response = client.get("/ide/state", headers={"X-Team-API-Key": issued["api_key"]})
     assert response.status_code == 503
-    assert response.json() == {
-        "error": {
-            "code": "DEPENDENCY_UNAVAILABLE",
-            "message": "Required dependencies are unavailable.",
-        }
-    }
+    assert response.json()["error"]["code"] == "DEPENDENCY_NOT_AVAILABLE"

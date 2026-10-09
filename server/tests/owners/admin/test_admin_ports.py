@@ -1,44 +1,40 @@
 import uuid
+from types import SimpleNamespace
 
-import pytest
-
-from app.modules.admin import ports
-
-
-@pytest.fixture()
-def restore_ports():
-    saved = (ports.market_status_provider(), ports.transaction_feed())
-    yield
-    ports.set_market_status_provider(saved[0])
-    ports.set_transaction_feed(saved[1])
+from app.contracts.market import MarketGateway
+from app.contracts.trading import TradingGateway, TransactionQuery
+from app.core.services import override
 
 
-def test_market_status_503_until_module_g_registers(client, login, login_organizer, restore_ports):
+def test_market_status_503_until_module_g_registers(client, login, login_organizer):
     login_organizer("VIEWER")
-    ports.set_market_status_provider(None)
-    assert client.get("/admin/market/status").status_code == 503
-    ports.set_market_status_provider(lambda s: {"round": 2, "phase": "AUCTION", "open_listings": 7})
-    assert client.get("/admin/market/status").json() == {"round": 2, "phase": "AUCTION", "open_listings": 7}
+    with override(MarketGateway, None):
+        assert client.get("/admin/market/status").status_code == 503
+    with override(
+        MarketGateway,
+        lambda s: SimpleNamespace(status_summary=lambda: {"round": 2, "phase": "AUCTION", "open_listings": 7}),
+    ):
+        assert client.get("/admin/market/status").json() == {"round": 2, "phase": "AUCTION", "open_listings": 7}
 
 
-def test_transaction_feed_gets_clamped_query(client, login, login_organizer, restore_ports):
+def test_transaction_feed_gets_clamped_query(client, login, login_organizer):
     login_organizer("VIEWER")
     seen = []
 
-    def feed(s, q):
+    def feed(q):
         seen.append(q)
         return {"items": [{"id": "tx1"}], "next_cursor": None}
 
-    ports.set_transaction_feed(feed)
-    t = uuid.uuid4()
-    r = client.get(f"/admin/transactions?team_id={t}&limit=100&cursor=abc")
-    assert r.json()["items"] == [{"id": "tx1"}]
-    assert seen[0] == ports.TransactionQuery(team_id=t, limit=100, cursor="abc")
-    assert client.get("/admin/transactions?limit=1000").status_code == 422
+    with override(TradingGateway, lambda s: SimpleNamespace(transaction_feed=feed)):
+        t = uuid.uuid4()
+        r = client.get(f"/admin/transactions?team_id={t}&limit=100&cursor=abc")
+        assert r.json()["items"] == [{"id": "tx1"}]
+        assert seen[0] == TransactionQuery(team_id=t, limit=100, cursor="abc")
+        assert client.get("/admin/transactions?limit=1000").status_code == 422
 
 
-def test_transactions_503_until_module_i_registers(client, login, login_organizer, restore_ports):
+def test_transactions_503_until_module_i_registers(client, login, login_organizer):
     login_organizer()
-    ports.set_transaction_feed(None)
-    r = client.get("/admin/transactions")
-    assert r.status_code == 503 and r.json()["error"]["context"] == {"module": "Module I transactions"}
+    with override(TradingGateway, None):
+        r = client.get("/admin/transactions")
+        assert r.status_code == 503 and r.json()["error"]["context"] == {"module": "Module I transactions"}

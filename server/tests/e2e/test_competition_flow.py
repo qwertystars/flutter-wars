@@ -45,7 +45,9 @@ def _open_round(client, organizer, kind, listings):
         _ok(client.post(f"/admin/market/rounds/{status['round']['id']}/close", headers=organizer))
     rnd = _ok(
         client.post(
-            "/admin/market/rounds", json={"name": f"{kind} round", "kind": kind, "listings": listings}, headers=organizer
+            "/admin/market/rounds",
+            json={"name": f"{kind} round", "kind": kind, "listings": listings},
+            headers=organizer,
         ),
         201,
     )
@@ -123,7 +125,10 @@ def test_auction_bids_settlement_and_refunds(client, organizer, team_login):
         client.post(
             "/admin/auctions",
             json={
-                "round_id": rnd["id"], "listing_id": listing["id"], "widget_id": wid, "quantity": 1,
+                "round_id": rnd["id"],
+                "listing_id": listing["id"],
+                "widget_id": wid,
+                "quantity": 1,
                 "starts_at": (now - timedelta(seconds=5)).isoformat(),
                 "closes_at": (now + timedelta(seconds=4)).isoformat(),
                 "minimum_bid": 10,
@@ -156,7 +161,17 @@ def test_auction_bids_settlement_and_refunds(client, organizer, team_login):
     assert _ok(client.get("/wallet", headers=winner))["held"] == 60  # Module E reservation
     assert _ok(client.get("/wallet", headers=loser))["held"] == 40
     with_loser = _ok(client.get(f"/auctions/{auction['id']}", headers=loser))
-    assert "60" not in str(with_loser)  # competitors' bids stay hidden
+    # Compare the public response fields: random UUIDs can contain the digits "60".
+    assert set(with_loser) == {
+        "id",
+        "listing_id",
+        "widget_id",
+        "quantity",
+        "state",
+        "starts_at",
+        "closes_at",
+        "minimum_bid",
+    }
 
     time.sleep(max(0.0, (now + timedelta(seconds=4.5) - datetime.now(UTC)).total_seconds()))
     _ok(client.post(f"/admin/auctions/{auction['id']}/close", headers=organizer))

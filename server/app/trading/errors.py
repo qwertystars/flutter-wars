@@ -1,6 +1,6 @@
 """Compatibility exports for the shared owner-facing error contract."""
 
-from app.integration.errors import (
+from app.contracts.marketplace_errors import (
     AmountTooLarge,
     AuctionNotOpen,
     BidNotIncreasing,

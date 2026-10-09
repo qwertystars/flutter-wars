@@ -29,7 +29,9 @@ Module docs: [A](docs/module-a.md), [B](docs/module-b.md), [C](docs/module-c.md)
 
 ## How the modules connect
 
-Every cross-module link is registered in one place, `app/integration/wiring.py`:
+Each module registers its own gateway and routes. Shared contracts in `app/contracts/`
+are resolved through `app/core/services.py`; feature modules never import another
+module's implementation. Boundary tests enforce this in CI:
 
 - **Identity:** Module B verifies Google sign-in and issues the JWT; every route uses its
   principal. Team ids are UUIDs. Module K's `organizer` table decides who is an

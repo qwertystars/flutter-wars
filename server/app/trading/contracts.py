@@ -1,6 +1,6 @@
 """Your original imports stay valid; canonical contracts are shared with Auction."""
 
-from app.integration.contracts import (
+from app.contracts.marketplace import (
     BrokeragePolicy,
     CatalogPort,
     InventoryPort,

@@ -105,7 +105,7 @@ The client never sends a price. Module I charges `quote.price × quantity`. See 
 
 Auction (J) does not use this engine for bids or winner selection.
 
-I/J call this through `app/modules/pricing/adapter.py` (`PricingAdapter`, the `PricingPort` implementation): `get_unit_price` → `get_current_price(...).price`, `record_trade` → `record_trade(..., TradeSide.BUY|SELL, now)`, in I's transaction.
+I/J call this through `app/modules/pricing/gateway.py` (`PricingGatewayImpl`, the `PricingGateway` implementation): `get_unit_price` → `get_current_price(...).price`, `record_trade` → `record_trade(..., TradeSide.BUY|SELL, now)`, in I's transaction.
 
 ## Integration note
 

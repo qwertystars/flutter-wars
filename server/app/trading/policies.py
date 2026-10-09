@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import UUID
 
-from app.integration.contracts import MAX_CREDITS, PurchaseListing
-from app.integration.errors import ConfigurationRequired
+from app.contracts.marketplace import MAX_CREDITS, PurchaseListing
+from app.contracts.marketplace_errors import ConfigurationRequired
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -125,9 +125,7 @@ class GeometricBrokerage:
             raise ValueError("Invalid whole-credit brokerage inputs.")
         if self.impact_bps == 0 or gross_amount == 0:
             return 0
-        return self._total_fee(prior_quantity + quantity, unit_price) - self._total_fee(
-            prior_quantity, unit_price
-        )
+        return self._total_fee(prior_quantity + quantity, unit_price) - self._total_fee(prior_quantity, unit_price)
 
     def _total_fee(self, quantity: int, unit_price: int) -> int:
         """Rounded fee for selling `quantity` units in one go (0 for none)."""
@@ -152,9 +150,7 @@ class GeometricBrokerage:
             scale = 1 << bits
             power_lower, power_upper = _power_bounds(numerator, denominator, quantity, scale)
             divisor = impact * scale
-            fee_lower = max(
-                0, gross_amount * divisor - unit_price * numerator * (scale - power_lower)
-            )
+            fee_lower = max(0, gross_amount * divisor - unit_price * numerator * (scale - power_lower))
             fee_upper = min(
                 gross_amount * divisor,
                 gross_amount * divisor - unit_price * numerator * (scale - power_upper),
