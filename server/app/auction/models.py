@@ -11,6 +11,7 @@ class AuctionState(str, Enum):
     OPEN = "OPEN"
     CLOSED = "CLOSED"
     SETTLED = "SETTLED"
+    CANCELLED = "CANCELLED"
 
 
 class Auction(SQLModel, table=True):
@@ -18,9 +19,7 @@ class Auction(SQLModel, table=True):
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_auction_quantity"),
         CheckConstraint("starts_at < closes_at", name="ck_auction_window"),
-        CheckConstraint(
-            "minimum_bid IS NULL OR minimum_bid BETWEEN 0 AND 2147483647", name="ck_auction_minimum"
-        ),
+        CheckConstraint("minimum_bid IS NULL OR minimum_bid BETWEEN 0 AND 2147483647", name="ck_auction_minimum"),
         CheckConstraint("accepted_bid_order >= 0", name="ck_auction_order"),
     )
     id: UUID = Field(default_factory=uuid4, primary_key=True)

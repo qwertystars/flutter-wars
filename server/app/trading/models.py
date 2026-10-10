@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, Column, DateTime, Index, UniqueConstraint
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -70,3 +70,36 @@ class TradeTransaction(SQLModel, table=True):
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+
+
+class ResaleAccount(SQLModel, table=True):
+    """Non-renewing event profit allowance and cumulative fee rounding, shared across widgets."""
+
+    __tablename__ = "resale_account"
+    __table_args__ = (
+        CheckConstraint(
+            "profit_paid >= 0 AND fee_notional >= 0 AND loss_realized >= 0", name="ck_resale_account_nonnegative"
+        ),
+    )
+    team_id: UUID = Field(primary_key=True)
+    profit_paid: int = Field(default=0, sa_type=BigInteger)
+    loss_realized: int = Field(default=0, sa_type=BigInteger)
+    fee_notional: int = Field(default=0, sa_type=BigInteger)
+
+
+class ResalePosition(SQLModel, table=True):
+    """Whole-credit remaining acquisition cost; no reset at a round/listing boundary."""
+
+    __tablename__ = "resale_position"
+    __table_args__ = (
+        CheckConstraint(
+            "quantity >= 0 AND cost >= 0 AND external_units >= 0 AND reward_units >= 0",
+            name="ck_resale_position_nonnegative",
+        ),
+    )
+    team_id: UUID = Field(primary_key=True)
+    widget_id: str = Field(primary_key=True, max_length=40)
+    quantity: int = Field(default=0, sa_type=BigInteger)
+    cost: int = Field(default=0, sa_type=BigInteger)
+    external_units: int = Field(default=0, sa_type=BigInteger)
+    reward_units: int = Field(default=0, sa_type=BigInteger)

@@ -25,6 +25,8 @@ class LedgerGateway(Protocol):
     OWNER: ClassVar[str] = "Module E ledger"
 
     # --- reads and organizer actions (Module K)
+    def initial_funding(self, team_id: UUID) -> int: ...
+
     def get_wallet(self, team_id: UUID) -> WalletView: ...
 
     def get_wallets(self, team_ids: list[UUID]) -> dict[UUID, WalletView]:

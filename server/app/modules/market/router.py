@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from app.contracts.admin import OrganizerPrincipal, Permission
 from app.contracts.pricing import PricingGateway
+from app.core.audit import audit
 from app.core.auth import Principal, get_principal, require_permission
 from app.core.clock import get_now
 from app.core.db import get_session
@@ -40,18 +41,14 @@ from app.modules.market.schemas import (
 MARKET_MANAGE = require_permission(Permission.MARKET_MANAGE)
 
 router = APIRouter(tags=["market"])
-admin = APIRouter(
-    prefix="/admin/market", tags=["market admin"], dependencies=[Depends(MARKET_MANAGE)]
-)
+admin = APIRouter(prefix="/admin/market", tags=["market admin"], dependencies=[Depends(MARKET_MANAGE)])
 
 
 def _round_out(rnd: MarketRound) -> RoundOut:
     return RoundOut.model_validate(rnd, from_attributes=True)
 
 
-def _listings_out(
-    session: Session, rnd: MarketRound, now: datetime, *, admin_view: bool
-) -> list[ListingOut]:
+def _listings_out(session: Session, rnd: MarketRound, now: datetime, *, admin_view: bool) -> list[ListingOut]:
     listings = service.listings_for_round(session, rnd.id)
     names = repo.widget_names(session, [listing.widget_id for listing in listings])
     prices = gateway(PricingGateway, session)
@@ -122,14 +119,15 @@ def market_summary(
             current_round=_round_out(rnd) if rnd else None,
             server_time=now,
         )
+
     result = market_reads.read(session, "market-summary", now, load)
     return result.model_copy(update={"server_time": now})
 
 
-
 @router.get("/market/rounds/current", response_model=RoundOut)
 def current_round(
-    session: Session = Depends(get_session), _: Principal = Depends(get_principal),
+    session: Session = Depends(get_session),
+    _: Principal = Depends(get_principal),
     now: datetime = Depends(get_now),
 ) -> RoundOut:
     def load() -> RoundOut:
@@ -137,8 +135,8 @@ def current_round(
         if rnd is None:
             raise NotFound("NO_CURRENT_ROUND", "No round has started yet.")
         return _round_out(rnd)
-    return market_reads.read(session, "current-round", now, load)
 
+    return market_reads.read(session, "current-round", now, load)
 
 
 @router.get("/market/listings", response_model=ListingsOut)
@@ -153,20 +151,26 @@ def current_listings(
             return ListingsOut(round=None, listings=[], server_time=now)
         listings = _listings_out(session, rnd, now, admin_view=False)
         return ListingsOut(round=_round_out(rnd), listings=listings, server_time=now)
+
     result = market_reads.read(
-        session, "current-listings", now, load,
+        session,
+        "current-listings",
+        now,
+        load,
         deadlines=lambda result: (item.price.valid_until for item in result.listings if item.price),
     )
     return result.model_copy(update={"server_time": now})
-
 
 
 # --- organizer ---
 
 
 @admin.post("", response_model=MarketOut, status_code=201)
-def create_market(body: MarketCreate, session: Session = Depends(get_session)) -> Market:
+def create_market(
+    body: MarketCreate, session: Session = Depends(get_session), organizer: OrganizerPrincipal = Depends(MARKET_MANAGE)
+) -> Market:
     market = service.create_market(session, body.name)
+    audit(session, organizer, "market.create", target_type="market", target_id=market.id, reason="Organizer create")
     session.commit()
     session.refresh(market)
     return market
@@ -179,7 +183,10 @@ def list_rounds(session: Session = Depends(get_session)) -> list[MarketRound]:
 
 @admin.post("/rounds", response_model=RoundDetailOut, status_code=201)
 def create_round(
-    body: RoundCreate, session: Session = Depends(get_session), now: datetime = Depends(get_now)
+    body: RoundCreate,
+    session: Session = Depends(get_session),
+    now: datetime = Depends(get_now),
+    organizer: OrganizerPrincipal = Depends(MARKET_MANAGE),
 ) -> RoundDetailOut:
     rnd = service.create_round(
         session,
@@ -188,6 +195,14 @@ def create_round(
         scheduled_open_at=body.scheduled_open_at,
         scheduled_close_at=body.scheduled_close_at,
         listings=[_spec(item) for item in body.listings],
+    )
+    audit(
+        session,
+        organizer,
+        "market.round_create",
+        target_type="round",
+        target_id=rnd.id,
+        reason="Organizer round create",
     )
     session.commit()
     return _round_detail(session, rnd, now)
@@ -223,6 +238,14 @@ def _transition_route(action: service.Action):
             reason=body.reason,
             expected_version=body.expected_version,
         )
+        audit(
+            session,
+            organizer,
+            f"market.round_{action}",
+            target_type="round",
+            target_id=round_id,
+            reason=body.reason or f"Organizer {action} round",
+        )
         session.commit()
         return RoundAdminOut.model_validate(rnd, from_attributes=True)
 
@@ -257,8 +280,17 @@ def add_listing(
     body: ListingCreate,
     session: Session = Depends(get_session),
     now: datetime = Depends(get_now),
+    organizer: OrganizerPrincipal = Depends(MARKET_MANAGE),
 ) -> ListingAdminOut:
     listing = service.add_listing(session, round_id, _spec(body))
+    audit(
+        session,
+        organizer,
+        "market.listing_create",
+        target_type="listing",
+        target_id=listing.id,
+        reason="Organizer listing create",
+    )
     session.commit()
     return _one_listing(session, listing, now)
 
@@ -269,6 +301,7 @@ def update_listing(
     body: ListingUpdate,
     session: Session = Depends(get_session),
     now: datetime = Depends(get_now),
+    organizer: OrganizerPrincipal = Depends(MARKET_MANAGE),
 ) -> ListingAdminOut:
     changes = {}
     for field in body.model_fields_set:
@@ -282,30 +315,55 @@ def update_listing(
         else:
             changes[field] = value
     listing = service.update_listing(session, listing_id, **changes)
+    audit(
+        session,
+        organizer,
+        "market.listing_update",
+        target_type="listing",
+        target_id=listing.id,
+        reason="Organizer listing update",
+    )
     session.commit()
     return _one_listing(session, listing, now)
 
 
 @admin.delete("/listings/{listing_id}", status_code=204)
-def delete_listing(listing_id: UUID, session: Session = Depends(get_session)) -> None:
+def delete_listing(
+    listing_id: UUID, session: Session = Depends(get_session), organizer: OrganizerPrincipal = Depends(MARKET_MANAGE)
+) -> None:
     service.delete_listing(session, listing_id)
+    audit(
+        session,
+        organizer,
+        "market.listing_delete",
+        target_type="listing",
+        target_id=listing_id,
+        reason="Organizer listing delete",
+    )
     session.commit()
 
 
 def _one_listing(session: Session, listing: MarketListing, now: datetime) -> ListingAdminOut:
     session.refresh(listing)
     rnd = service.get_round(session, listing.round_id)
-    return next(
-        item for item in _listings_out(session, rnd, now, admin_view=True) if item.id == listing.id
-    )
+    return next(item for item in _listings_out(session, rnd, now, admin_view=True) if item.id == listing.id)
 
 
 @admin.post("/listings/{listing_id}/auction-lots", response_model=AuctionLotOut, status_code=201)
 def create_auction_lot(
-    listing_id: UUID, body: AuctionLotCreate, session: Session = Depends(get_session)
+    listing_id: UUID,
+    body: AuctionLotCreate,
+    session: Session = Depends(get_session),
+    organizer: OrganizerPrincipal = Depends(MARKET_MANAGE),
 ) -> MarketAuctionLot:
-    lot = service.create_auction_lot(
-        session, listing_id, auction_id=body.auction_id, quantity=body.quantity
+    lot = service.create_auction_lot(session, listing_id, auction_id=body.auction_id, quantity=body.quantity)
+    audit(
+        session,
+        organizer,
+        "market.lot_create",
+        target_type="auction_lot",
+        target_id=lot.auction_id,
+        reason="Organizer lot create",
     )
     session.commit()
     session.refresh(lot)
@@ -313,6 +371,16 @@ def create_auction_lot(
 
 
 @admin.delete("/auction-lots/{auction_id}", status_code=204)
-def release_auction_lot(auction_id: UUID, session: Session = Depends(get_session)) -> None:
+def release_auction_lot(
+    auction_id: UUID, session: Session = Depends(get_session), organizer: OrganizerPrincipal = Depends(MARKET_MANAGE)
+) -> None:
     service.release_auction_lot(session, auction_id)
+    audit(
+        session,
+        organizer,
+        "market.lot_release",
+        target_type="auction_lot",
+        target_id=auction_id,
+        reason="Organizer lot release",
+    )
     session.commit()

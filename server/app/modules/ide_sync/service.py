@@ -5,10 +5,13 @@ import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from uuid import UUID
 
 from sqlmodel import Session
 
+from app.contracts.identity import IdentityGateway
 from app.core.errors import AppError
+from app.core.services import gateway
 from app.modules.ide_sync.model import TeamApiKey
 from app.modules.ide_sync.repository import ApiKeyRepository
 
@@ -90,6 +93,9 @@ class ApiKeyService:
             or not hmac.compare_digest(record.secret_hash, self._hash(secret))
         ):
             raise AppError("API_KEY_INVALID", "API key is invalid.", 401)
+        team = gateway(IdentityGateway, self.session).get_team(UUID(record.team_id))
+        if team is None or team.status != "ACTIVE":
+            raise AppError("TEAM_ACCESS_DENIED", "This team is disabled or unavailable.", 403)
         # Best-effort metadata; it remains in this request transaction but does
         # not change the authorization decision or expose credential material.
         record.last_used_at = self._now()

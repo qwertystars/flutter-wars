@@ -69,6 +69,7 @@ class MarketRound(SQLModel, table=True):
     paused_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
     closed_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
     finalized_at: datetime | None = Field(default=None, sa_type=sa.DateTime(timezone=True))
+    paused_seconds: float = Field(default=0, sa_column=sa.Column(sa.Float, nullable=False, server_default="0"))
     # Bumped on every transition; used for optimistic concurrency between organizers.
     version: int = 1
     created_at: datetime = Field(default_factory=_now, sa_type=sa.DateTime(timezone=True))
@@ -81,12 +82,8 @@ class MarketListing(SQLModel, table=True):
     __table_args__ = (
         sa.UniqueConstraint("round_id", "widget_id", name="uq_market_listing_round_widget"),
         sa.CheckConstraint("base_price > 0", name="ck_market_listing_base_price_positive"),
-        sa.CheckConstraint(
-            "supply_total IS NULL OR supply_total >= 0", name="ck_market_listing_supply_nonneg"
-        ),
-        sa.CheckConstraint(
-            "stock_remaining IS NULL OR stock_remaining >= 0", name="ck_market_listing_stock_nonneg"
-        ),
+        sa.CheckConstraint("supply_total IS NULL OR supply_total >= 0", name="ck_market_listing_supply_nonneg"),
+        sa.CheckConstraint("stock_remaining IS NULL OR stock_remaining >= 0", name="ck_market_listing_stock_nonneg"),
         sa.CheckConstraint(
             "(supply_total IS NULL) = (stock_remaining IS NULL)",
             name="ck_market_listing_infinite_consistent",
@@ -101,6 +98,7 @@ class MarketListing(SQLModel, table=True):
     round_id: UUID = Field(foreign_key="market_round.id", index=True)
     widget_id: str = Field(foreign_key="widget.id", index=True, max_length=40)
     base_price: int = Field(sa_type=sa.BigInteger)
+    demand_seed: int = Field(default=0, sa_column=sa.Column(sa.BigInteger, nullable=False, server_default="0"))
     supply_total: int | None = None
     stock_remaining: int | None = None
     max_per_purchase: int | None = None

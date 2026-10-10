@@ -42,13 +42,13 @@ def test_static_never_moves() -> None:
 @pytest.mark.parametrize(
     ("bought", "expected"),
     [
-        (0, 90),  # ratio 0      -> x0.9
-        (4, 90),  # ratio 0.4    -> x0.9
+        (0, 99),  # No retained demand, ease downward
+        (4, 100),  # Slight demand holds the reference price
         (5, 100),  # ratio 0.5    -> x1.0
-        (10, 115),  # ratio 1.0    -> x1.15
-        (15, 130),  # ratio 1.5    -> x1.3
-        (20, 150),  # ratio 2.0    -> x1.5
-        (99, 150),
+        (10, 101),  # ratio 1.0    -> x1.15
+        (15, 101),  # ratio 1.5    -> x1.3
+        (20, 101),  # ratio 2.0    -> x1.5
+        (99, 101),
     ],
 )
 def test_dynamic_bands(bought: int, expected: int) -> None:
@@ -57,23 +57,23 @@ def test_dynamic_bands(bought: int, expected: int) -> None:
 
 
 def test_dynamic_clamps_to_band_around_base_price() -> None:
-    assert step(200, 50, 100) == 200  # max_factor 2.0
-    assert step(75, 0, 100) == 75  # min_factor 0.75
-    assert step(80, 0, 100) == 75
+    assert step(200, 50, 100) == 102  # Hard 2% upper bound
+    assert step(75, 0, 100) == 98  # Hard 2% lower bound
+    assert step(80, 0, 100) == 98
 
 
 def test_dynamic_rounds_to_price_step() -> None:
-    assert step(103, 0, 100, base=103) == 95  # 92.7 -> 95 (floor of band is ceil(77.25/5)*5 = 80)
+    assert step(103, 0, 100, base=103) == 102  # 92.7 -> 95 (floor of band is ceil(77.25/5)*5 = 80)
     params = DynamicParams(price_step=1)
-    assert step(103, 0, 100, base=103, params=params) == 93
+    assert step(103, 0, 100, base=103, params=params) == 102
 
 
 def test_sales_offset_purchases() -> None:
-    assert step(100, 20, 100, sold=20) == 90  # net demand 0
+    assert step(100, 20, 100, sold=20) == 99  # net demand 0
 
 
 def test_no_supply_signal_holds_price() -> None:
-    assert step(120, 0, 0) == 120
+    assert step(120, 0, 0) == 101
     assert step(120, 5, None) == 120
 
 
@@ -111,11 +111,8 @@ def test_dynamic_rejects_bad_params(raw: dict) -> None:
     assert exc.value.code == "INVALID_PRICING_PARAMS"
 
 
-def test_custom_bands_and_decimal_params_round_trip() -> None:
-    raw = {
-        "target_fraction": "0.25",
-        "bands": [{"below": "1", "multiplier": "0.95"}, {"multiplier": "1.2"}],
-    }
+def test_bounded_decimal_params_round_trip() -> None:
+    raw = {"target_fraction": "0.25", "min_factor": "0.99", "max_factor": "1.01"}
     params = dynamic.parse_params(raw, infinite_supply=False)
     assert params.target_fraction == Decimal("0.25")
     again = dynamic.parse_params(params.model_dump(mode="json"), infinite_supply=False)
@@ -145,8 +142,6 @@ def test_new_strategy_can_be_registered(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(strategies, "_REGISTRY", dict(strategies._REGISTRY))
     strategies.register(Ramp())
-    assert (
-        get_strategy("ramp").next_price(FlatParams(add=3), PricingInput(10, 10, 0, 0, None)) == 13
-    )
+    assert get_strategy("ramp").next_price(FlatParams(add=3), PricingInput(10, 10, 0, 0, None)) == 13
     with pytest.raises(ValueError):
         strategies.register(Ramp())

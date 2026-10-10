@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from uuid import UUID
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.contracts.marketplace import Adapters
 from app.contracts.marketplace_errors import (
@@ -36,7 +36,10 @@ class AuctionService:
 
     def _guard(self, auction_id: UUID, operation: str) -> Auction:
         require_transaction(self._repo.session)
+        lock_request(self._repo.session, scope=f"auction-lifecycle:{auction_id}")
         snapshot = self._repo.auction(auction_id)
+        if snapshot.state == AuctionState.CANCELLED:
+            raise AuctionNotOpen()
         identity = (snapshot.round_id, snapshot.listing_id, snapshot.widget_id, snapshot.quantity)
         self._adapters.market.guard_auction(
             auction_id=auction_id,
@@ -71,9 +74,12 @@ class AuctionService:
 
     def close(self, auction_id: UUID) -> Auction:
         auction = self._guard(auction_id, "settle")
-        if auction.state == AuctionState.DRAFT or self._repo.now() < auction.closes_at:
+        if auction.state not in (AuctionState.OPEN, AuctionState.CLOSED):
+            raise AuctionNotOpen()
+        if self._repo.now() <= auction.starts_at:
             raise AuctionNotOpen()
         if auction.state == AuctionState.OPEN:
+            auction.closes_at = min(auction.closes_at, self._repo.now())
             auction.state = AuctionState.CLOSED
             self._repo.add(auction)
         return auction
@@ -150,6 +156,7 @@ class AuctionService:
 
     def settle(self, auction_id: UUID) -> AuctionResult:
         require_transaction(self._repo.session)
+        lock_request(self._repo.session, scope=f"auction-lifecycle:{auction_id}")
         result = self._repo.result(auction_id)
         if result:
             return result
@@ -158,7 +165,9 @@ class AuctionService:
         if result:
             return result
         now = self._repo.now()
-        if auction.state not in (AuctionState.OPEN, AuctionState.CLOSED) or now < auction.closes_at:
+        if auction.state not in (AuctionState.OPEN, AuctionState.CLOSED) or (
+            auction.state == AuctionState.OPEN and now < auction.closes_at
+        ):
             raise AuctionNotOpen()
         bids = self._repo.bids(auction_id)
         self._adapters.ledger.lock_accounts(team_ids=sorted({bid.team_id for bid in bids}, key=str))
@@ -196,6 +205,42 @@ class AuctionService:
         auction.state = AuctionState.SETTLED
         self._repo.add(auction)
         return result
+
+    def cancel(self, auction_id: UUID) -> Auction:
+        require_transaction(self._repo.session)
+        lock_request(self._repo.session, scope=f"auction-lifecycle:{auction_id}")
+        snapshot = self._repo.auction(auction_id)
+        if snapshot.state == AuctionState.CANCELLED:
+            return snapshot
+        if snapshot.state == AuctionState.SETTLED:
+            raise AuctionNotOpen()
+        auction = self._guard(auction_id, "settle")
+        if auction.state == AuctionState.SETTLED:
+            raise AuctionNotOpen()
+        bids = self._repo.bids(auction_id)
+        self._adapters.ledger.lock_accounts(team_ids=sorted({b.team_id for b in bids}, key=str))
+        for bid in bids:
+            self._adapters.ledger.release(team_id=bid.team_id, reservation_id=bid.id)
+        self._adapters.market.release_auction_lot(auction_id=auction.id)
+        auction.state = AuctionState.CANCELLED
+        self._repo.add(auction)
+        return auction
+
+    def list_auctions(self, *, admin: bool, limit: int, offset: int) -> list[AuctionView]:
+        statement = select(Auction)
+        if not admin:
+            statement = statement.where(Auction.state != AuctionState.DRAFT)
+        auctions = self._repo.session.exec(
+            statement.order_by(Auction.starts_at.desc(), Auction.id).limit(limit).offset(offset)
+        ).all()
+        now = self._repo.now()
+        out = []
+        for auction in auctions:
+            view = AuctionView.model_validate(auction)
+            if view.state == AuctionState.OPEN and now >= view.closes_at:
+                view.state = AuctionState.CLOSED
+            out.append(view)
+        return out
 
     def _published(self, auction_id: UUID) -> Auction:
         """Participant reads: a DRAFT auction is unpublished and answers as missing.

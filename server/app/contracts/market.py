@@ -43,6 +43,10 @@ class ListingFacts:
     round_status: RoundStatus
     opened_at: datetime | None
     closed_at: datetime | None
+    paused_at: datetime | None = None
+    paused_seconds: float = 0
+    supply_total: int | None = None
+    demand_seed: int = 0
 
 
 # Columns of MarketGateway.listing_facts_view(), one row per listing.
@@ -55,6 +59,10 @@ LISTING_FACTS_COLUMNS = (
     "round_status",
     "opened_at",
     "closed_at",
+    "paused_at",
+    "paused_seconds",
+    "supply_total",
+    "demand_seed",
 )
 
 

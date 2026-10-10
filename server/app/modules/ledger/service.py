@@ -293,6 +293,8 @@ def capture(
 def lock_wallets(s: Session, team_ids: list[UUID]) -> None:
     """Lock these teams' wallets (sorted, FOR UPDATE) before a multi-step change such as an
     auction settlement, so concurrent spends and holds wait. Missing wallet -> WalletNotFound."""
+    for team_id in sorted(set(team_ids)):
+        repo.ensure_wallet(s, team_id)
     found = set(repo.lock_wallets(s, team_ids))
     if found != set(team_ids):
         raise WalletNotFound()

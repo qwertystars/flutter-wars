@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from app.auction.models import Auction, AuctionState
 from app.contracts.principal import Principal
+from app.core.db import get_db
 from app.core.principal import get_principal
 from app.main import create_app
 from app.modules.admin.authz import require_organizer
@@ -17,6 +18,12 @@ from tests.market.test_modules import bid
 def _app(env):
     app = create_app()
     app.state.backend_runtime = env.runtime  # stand-in owner adapters
+
+    def session():
+        with Session(env.engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = session
     return app
 
 
@@ -106,9 +113,7 @@ def test_failure_response_is_safe_and_rolls_back(env):
 def test_invalid_http_quantity_and_bid(env):
     c = client(env)
     for amount in (True, "100", 1.5, -1):
-        response = c.post(
-            f"/auctions/{env.auction}/bids", json=dict(amount=amount, idempotency_key=str(uuid4()))
-        )
+        response = c.post(f"/auctions/{env.auction}/bids", json=dict(amount=amount, idempotency_key=str(uuid4())))
         assert response.status_code == 422
     response = c.post(
         "/market/purchase",
@@ -151,10 +156,7 @@ def test_draft_requires_allocated_stock_before_open(env):
     auction_id = response.json()["id"]
     assert response.json()["state"] == "DRAFT"
     assert c.post(f"/admin/auctions/{auction_id}/open").status_code == 503
-    assert (
-        c.patch(f"/admin/auctions/{auction_id}/minimum-bid", json={"amount": 100}).status_code
-        == 200
-    )
+    assert c.patch(f"/admin/auctions/{auction_id}/minimum-bid", json={"amount": 100}).status_code == 200
     # Configuration is not an allocation: open still cannot invent stock.
     assert c.post(f"/admin/auctions/{auction_id}/open").status_code == 503
 
@@ -163,10 +165,7 @@ def test_admin_configuration_is_forbidden_to_participants(env):
     c = client(env)
     for path in ("open", "close"):
         assert c.post(f"/admin/auctions/{env.auction}/{path}").status_code == 403
-    assert (
-        c.patch(f"/admin/auctions/{env.auction}/minimum-bid", json={"amount": 100}).status_code
-        == 403
-    )
+    assert c.patch(f"/admin/auctions/{env.auction}/minimum-bid", json={"amount": 100}).status_code == 403
 
 
 def test_draft_auction_is_hidden_from_participants(env):

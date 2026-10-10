@@ -77,8 +77,10 @@ def _advance(state: ListingPricing, facts: ListingFacts, now: datetime) -> _Adva
     if seconds is None or facts.opened_at is None:
         return unchanged
 
-    anchor = as_utc(facts.opened_at)
+    anchor = as_utc(facts.opened_at) + timedelta(seconds=facts.paused_seconds)
     until = as_utc(now)
+    if facts.paused_at is not None:
+        until = min(until, as_utc(facts.paused_at))
     if facts.closed_at is not None:
         until = min(until, as_utc(facts.closed_at))
     interval = timedelta(seconds=seconds)
@@ -94,7 +96,7 @@ def _advance(state: ListingPricing, facts: ListingFacts, now: datetime) -> _Adva
     while index < target:
         new_price = strategy.next_price(
             params,
-            PricingInput(facts.base_price, price, bought, sold, supply),
+            PricingInput(facts.base_price, price, bought, sold, supply, facts.supply_total, facts.demand_seed),
         )
         index += 1
         if new_price != price:
@@ -105,7 +107,7 @@ def _advance(state: ListingPricing, facts: ListingFacts, now: datetime) -> _Adva
         if quiet and stable:
             # Every remaining interval has identical inputs, so nothing else moves.
             index = target
-    live = facts.round_status in LIVE_STATUSES
+    live = facts.round_status == RoundStatus.OPEN
     valid_until = anchor + (index + 1) * interval if live else None
     return _Advanced(price, index, bought, sold, steps, valid_until)
 

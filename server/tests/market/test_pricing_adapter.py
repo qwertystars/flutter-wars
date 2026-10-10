@@ -34,7 +34,7 @@ def test_trade_crossing_a_boundary_is_booked_in_its_quoted_interval(session, wid
     state = session.get(ListingPricing, listing.id)
     assert (state.interval_index, state.interval_bought) == (0, 50)
     # 50 of 100 units bought in interval 0 is high demand: the price rises, it must not fall.
-    assert pricing.get_current_price(session, listing.id, T0 + timedelta(seconds=10.5)).price == 150
+    assert pricing.get_current_price(session, listing.id, T0 + timedelta(seconds=10.5)).price == 101
 
 
 def test_record_trade_without_a_quote_is_refused(session, widgets):

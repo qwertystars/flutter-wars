@@ -30,6 +30,7 @@ from app.main import create_app
 from app.modules.admin import OrganizerPrincipal, Role
 from app.modules.admin.authz import require_organizer
 from app.modules.admin.errors import NotOrganizer
+from app.modules.admin.models import AdminActionLog
 from app.modules.admin.permissions import ROLE_PERMISSIONS
 from app.modules.catalog.models import Widget
 from app.modules.market.models import Market, MarketAuctionLot, MarketListing, MarketRound, MarketRoundEvent
@@ -56,6 +57,9 @@ PG_URL = os.environ.get("MODULES_TEST_DATABASE_URL")
 T0 = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
 # Module D's catalog plus Modules G/H. I/J tables come from the `env` fixtures below.
 GH_TABLES = (
+    AdminActionLog,
+    TradeTransaction,
+    Auction,
     Widget,
     Market,
     MarketRound,

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.core.errors import AppError
 
@@ -26,6 +26,8 @@ class PricingInput:
     bought: int
     sold: int
     supply_at_start: int | None  # None = infinite supply
+    initial_supply: int | None = None
+    initial_demand: int = 0
 
 
 class PricingStrategy[P: BaseModel](ABC):
@@ -74,50 +76,18 @@ class StaticStrategy(PricingStrategy[StaticParams]):
         return data.current_price
 
 
-class DemandBand(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    below: Decimal | None = Field(
-        default=None, gt=0, description="Upper bound of the demand ratio; null = catch-all"
-    )
-    multiplier: Decimal = Field(gt=0, le=10)
-
-
-DEFAULT_BANDS = [
-    DemandBand(below=Decimal("0.5"), multiplier=Decimal("0.9")),
-    DemandBand(below=Decimal("1"), multiplier=Decimal("1")),
-    DemandBand(below=Decimal("1.5"), multiplier=Decimal("1.15")),
-    DemandBand(below=Decimal("2"), multiplier=Decimal("1.3")),
-    DemandBand(below=None, multiplier=Decimal("1.5")),
-]
-
-
 class DynamicParams(BaseModel):
-    """Supply-demand repricing. Every `interval_seconds` the price is multiplied
-    by the band matching ratio = net_units_bought / (supply_at_interval_start *
-    target_fraction), rounded to `price_step` and clamped to
-    [base_price * min_factor, base_price * max_factor]."""
+    """Event pricing responds to net units retained, never raw transaction volume.
+    The hard 98%-102% range and 1% interval speed protect workshop participants.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     interval_seconds: int = Field(default=120, ge=10, le=86_400)
     target_fraction: Decimal = Field(default=Decimal("0.1"), gt=0, le=1)
-    bands: list[DemandBand] = Field(
-        default_factory=lambda: list(DEFAULT_BANDS), min_length=1, max_length=20
-    )
-    min_factor: Decimal = Field(default=Decimal("0.75"), gt=0, le=1)
-    max_factor: Decimal = Field(default=Decimal("2"), ge=1, le=100)
-    price_step: int = Field(default=5, ge=1, le=1_000_000)
-
-    @model_validator(mode="after")
-    def _check_bands(self) -> "DynamicParams":
-        bounds = [band.below for band in self.bands]
-        if bounds[-1] is not None or any(bound is None for bound in bounds[:-1]):
-            raise ValueError("only the last band may (and must) have below = null")
-        finite = [bound for bound in bounds if bound is not None]
-        if finite != sorted(set(finite)):
-            raise ValueError("band bounds must be strictly increasing")
-        return self
+    min_factor: Decimal = Field(default=Decimal("0.98"), ge=Decimal("0.98"), le=1)
+    max_factor: Decimal = Field(default=Decimal("1.02"), ge=1, le=Decimal("1.02"))
+    price_step: int = Field(default=1, ge=1, le=1, description="Integer credits; legacy coarse steps are unsupported")
 
 
 class DynamicSupplyDemandStrategy(PricingStrategy[DynamicParams]):
@@ -136,24 +106,25 @@ class DynamicSupplyDemandStrategy(PricingStrategy[DynamicParams]):
         return params.interval_seconds
 
     def next_price(self, params: DynamicParams, data: PricingInput) -> int:
-        if not data.supply_at_start:
-            # Infinite or sold out: there is no supply signal to react to.
+        # Custom event market: net retained demand, bounded target, gradual movement.
+        # Volume from buying and returning the same units contributes nothing.
+        if data.supply_at_start is None:
             return data.current_price
-        demand = max(data.bought - data.sold, 0)
-        ratio = Decimal(demand) / (Decimal(data.supply_at_start) * params.target_fraction)
-        multiplier = next(
-            band.multiplier for band in params.bands if band.below is None or ratio < band.below
+        total = data.initial_supply if data.initial_supply is not None else data.supply_at_start
+        reference = max(1, total + data.initial_demand)
+        held = max(0, data.initial_demand + total - data.supply_at_start + data.bought - data.sold)
+        pressure = min(Decimal(1), Decimal(held) / (Decimal(reference) * params.target_fraction))
+        lower = max(1, math.ceil(Decimal(data.base_price) * max(params.min_factor, Decimal("0.98"))))
+        upper = max(lower, math.floor(Decimal(data.base_price) * min(params.max_factor, Decimal("1.02"))))
+        target = int(
+            (Decimal(data.base_price) * (Decimal("0.98") + Decimal("0.04") * pressure)).quantize(
+                Decimal(1), rounding=ROUND_HALF_UP
+            )
         )
-        step = Decimal(params.price_step)
-        raw = (Decimal(data.current_price) * multiplier / step).quantize(
-            Decimal(1), rounding=ROUND_HALF_UP
-        ) * step
-        lower = math.ceil(Decimal(data.base_price) * params.min_factor / step) * params.price_step
-        upper = math.floor(Decimal(data.base_price) * params.max_factor / step) * params.price_step
-        lower = max(lower, params.price_step)
-        if lower > upper:  # step coarser than the allowed band: hold the base price
-            return data.base_price
-        return int(min(max(raw, lower), upper))
+        target = min(max(target, lower), upper)
+        movement = data.base_price // 100  # at most 1% per interval; tiny prices stay stable
+        current = min(max(data.current_price, lower), upper)
+        return min(max(target, current - movement), current + movement)
 
 
 _REGISTRY: dict[str, PricingStrategy[Any]] = {}

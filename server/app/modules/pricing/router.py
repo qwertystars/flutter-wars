@@ -4,8 +4,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
-from app.contracts.admin import Permission
+from app.contracts.admin import OrganizerPrincipal, Permission
 from app.contracts.market import MarketGateway
+from app.core.audit import audit
 from app.core.auth import Principal, get_principal, require_permission
 from app.core.clock import get_now
 from app.core.db import get_session
@@ -39,13 +40,18 @@ def listing_price(
     def load():
         gateway(MarketGateway, session).require_listing(listing_id, visible_only=True)
         return service.quote(session, listing_id, now)
-    q = market_reads.read(session, ("listing-price", listing_id), now, load,
-                          deadlines=lambda quote: (quote.valid_until,))
-    return PriceQuoteOut(
-        listing_id=q.listing_id, price=q.price, strategy=q.strategy,
-        interval_index=q.interval_index, valid_until=q.valid_until, server_time=now,
-    )
 
+    q = market_reads.read(
+        session, ("listing-price", listing_id), now, load, deadlines=lambda quote: (quote.valid_until,)
+    )
+    return PriceQuoteOut(
+        listing_id=q.listing_id,
+        price=q.price,
+        strategy=q.strategy,
+        interval_index=q.interval_index,
+        valid_until=q.valid_until,
+        server_time=now,
+    )
 
 
 @admin.get("/pricing-strategies", response_model=list[StrategyOut])
@@ -76,10 +82,20 @@ def get_pricing(listing_id: UUID, session: Session = Depends(get_session)) -> Pr
 def update_pricing(
     listing_id: UUID,
     body: PricingUpdate,
+    organizer: OrganizerPrincipal = Depends(MARKET_MANAGE),
     session: Session = Depends(get_session),
     now: datetime = Depends(get_now),
 ) -> PricingConfigOut:
     state = service.update_pricing(session, listing_id, strategy=body.strategy, params=body.params, now=now)
+    audit(
+        session,
+        organizer,
+        "pricing.update",
+        target_type="listing",
+        target_id=listing_id,
+        reason="Organizer updated pricing",
+        details={"strategy": state.strategy, "params_version": state.params_version},
+    )
     session.commit()
     session.refresh(state)
     return _config_out(state)

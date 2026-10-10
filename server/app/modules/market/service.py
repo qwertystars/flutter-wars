@@ -18,11 +18,14 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, func, select, update
 
+from app.contracts.auction import AuctionGateway
 from app.contracts.catalog import CatalogGateway
 from app.contracts.market import AuctionOperation
 from app.contracts.pricing import PricingGateway
+from app.contracts.trading import TradingGateway
+from app.core.clock import as_utc
 from app.core.errors import AppError, Conflict, NotFound
-from app.core.services import gateway
+from app.core.services import gateway, optional_gateway
 from app.modules.market import repository as repo
 from app.modules.market.models import (
     LIVE_STATUSES,
@@ -111,9 +114,7 @@ def create_round(
     try:
         session.flush()
     except IntegrityError:
-        raise Conflict(
-            "ROUND_CREATE_CONFLICT", "Another round was created at the same time; retry."
-        ) from None
+        raise Conflict("ROUND_CREATE_CONFLICT", "Another round was created at the same time; retry.") from None
     for spec in listings:
         add_listing(session, rnd.id, spec)
     return rnd
@@ -218,9 +219,7 @@ def transition(
             )
     if first_open:
         if not listing_ids:
-            raise Conflict(
-                "ROUND_HAS_NO_LISTINGS", "A round needs at least one listing before it can open."
-            )
+            raise Conflict("ROUND_HAS_NO_LISTINGS", "A round needs at least one listing before it can open.")
         archived = repo.archived_widget_ids(session, rnd.id)
         if archived:
             raise Conflict(
@@ -235,6 +234,10 @@ def transition(
     if action == "pause":
         values["paused_at"] = now
     elif action == "open":
+        if rnd.paused_at is not None:
+            values["paused_seconds"] = rnd.paused_seconds + max(
+                0, (as_utc(now) - as_utc(rnd.paused_at)).total_seconds()
+            )
         values["paused_at"] = None
     elif action == "close":
         # A trade that committed while we waited for the lock may carry a later
@@ -253,13 +256,9 @@ def transition(
         result = session.exec(statement)  # type: ignore[call-overload]
     except IntegrityError:
         # Lost a race against another organizer opening a different round.
-        raise Conflict(
-            "ANOTHER_ROUND_LIVE", "Another round in this market is already open or paused."
-        ) from None
+        raise Conflict("ANOTHER_ROUND_LIVE", "Another round in this market is already open or paused.") from None
     if result.rowcount != 1:
-        raise Conflict(
-            "ROUND_VERSION_CONFLICT", "The round was changed by someone else; reload and retry."
-        )
+        raise Conflict("ROUND_VERSION_CONFLICT", "The round was changed by someone else; reload and retry.")
 
     session.add(
         MarketRoundEvent(
@@ -272,6 +271,11 @@ def transition(
         )
     )
     if first_open:
+        trades = optional_gateway(TradingGateway, session)
+        if trades is not None:
+            for listing in repo.listings(session, rnd.id):
+                listing.demand_seed = trades.net_units(listing.widget_id)
+                session.add(listing)
         gateway(PricingGateway, session).on_round_opened(listing_ids, now)
     session.flush()
     session.refresh(rnd)
@@ -282,9 +286,7 @@ def round_events(session: Session, round_id: UUID) -> list[MarketRoundEvent]:
     get_round(session, round_id)
     return list(
         session.exec(
-            select(MarketRoundEvent)
-            .where(MarketRoundEvent.round_id == round_id)
-            .order_by(col(MarketRoundEvent.id)),
+            select(MarketRoundEvent).where(MarketRoundEvent.round_id == round_id).order_by(col(MarketRoundEvent.id)),
         )
     )
 
@@ -317,9 +319,7 @@ def _check_widget(session: Session, widget_id: str) -> None:
 def _fresh_listing(session: Session, listing_id: UUID) -> MarketListing:
     """Re-read a listing after taking a round lock; it may have been deleted meanwhile."""
     listing = session.exec(
-        select(MarketListing)
-        .where(MarketListing.id == listing_id)
-        .execution_options(populate_existing=True),
+        select(MarketListing).where(MarketListing.id == listing_id).execution_options(populate_existing=True),
     ).one_or_none()
     if listing is None:
         raise NotFound("LISTING_NOT_FOUND", "Listing not found.", listing_id=listing_id)
@@ -365,9 +365,7 @@ def add_listing(session: Session, round_id: UUID, spec: ListingSpec) -> MarketLi
     return listing
 
 
-def _configure_pricing(
-    session: Session, listing: MarketListing, strategy: str, params: dict[str, Any]
-) -> None:
+def _configure_pricing(session: Session, listing: MarketListing, strategy: str, params: dict[str, Any]) -> None:
     """Module H validates and stores the listing's pricing (draft rounds only)."""
     gateway(PricingGateway, session).configure_listing(
         listing_id=listing.id,
@@ -452,9 +450,7 @@ class TradableListing:
     max_per_purchase: int | None
 
 
-def lock_listing_for_trade(
-    session: Session, listing_id: UUID, *, kind: RoundKind
-) -> TradableListing:
+def lock_listing_for_trade(session: Session, listing_id: UUID, *, kind: RoundKind) -> TradableListing:
     """Check, inside the caller's transaction, that a listing can be traded
     right now. Holds a shared lock on the round row until the transaction
     ends, so the round cannot be paused/closed under an in-flight trade.
@@ -471,9 +467,7 @@ def lock_listing_for_trade(
     # snapshot only; take_stock is the authoritative check.
     listing = _fresh_listing(session, listing_id)
     if rnd.kind != kind:
-        raise Conflict(
-            "WRONG_ROUND_KIND", f"This listing belongs to a {rnd.kind} round.", kind=rnd.kind
-        )
+        raise Conflict("WRONG_ROUND_KIND", f"This listing belongs to a {rnd.kind} round.", kind=rnd.kind)
     return TradableListing(
         listing.id,
         rnd.id,
@@ -529,9 +523,8 @@ def return_stock(session: Session, listing_id: UUID, quantity: int) -> int | Non
 
 # --- auction lots: the market side of an Auction Engine (J) auction ---
 
-def create_auction_lot(
-    session: Session, listing_id: UUID, *, auction_id: UUID, quantity: int
-) -> MarketAuctionLot:
+
+def create_auction_lot(session: Session, listing_id: UUID, *, auction_id: UUID, quantity: int) -> MarketAuctionLot:
     """Hold `quantity` units of an auction-round listing for one J auction.
 
     Organizer action, after J has created the auction (DRAFT) and before J
@@ -554,9 +547,7 @@ def create_auction_lot(
     if listing.infinite_supply:
         raise Conflict("INFINITE_SUPPLY", "Auction lots need a finite-supply listing.")
     if session.get(MarketAuctionLot, auction_id) is not None:
-        raise Conflict(
-            "AUCTION_LOT_EXISTS", "This auction already has a lot.", auction_id=auction_id
-        )
+        raise Conflict("AUCTION_LOT_EXISTS", "This auction already has a lot.", auction_id=auction_id)
     stock = col(MarketListing.stock_remaining)
     taken = session.exec(  # type: ignore[call-overload]
         update(MarketListing)
@@ -572,9 +563,7 @@ def create_auction_lot(
     try:
         session.flush()
     except IntegrityError:
-        raise Conflict(
-            "AUCTION_LOT_EXISTS", "This auction already has a lot.", auction_id=auction_id
-        ) from None
+        raise Conflict("AUCTION_LOT_EXISTS", "This auction already has a lot.", auction_id=auction_id) from None
     session.expire(listing)
     return lot
 
@@ -639,11 +628,18 @@ def consume_auction_lot(session: Session, auction_id: UUID) -> None:
         raise Conflict("AUCTION_LOT_MISSING", "No unconsumed lot is held for this auction.")
 
 
-def release_auction_lot(session: Session, auction_id: UUID) -> None:
+def release_auction_lot(session: Session, auction_id: UUID, *, internal: bool = False) -> None:
     """Return an unconsumed lot's units to stock (e.g. an auction with no bids)."""
+    snapshot = session.get(MarketAuctionLot, auction_id)
+    if snapshot is not None:
+        lock_round(session, get_listing(session, snapshot.listing_id).round_id)
     lot = _lock_lot(session, auction_id)
     if lot is None or lot.consumed:
         raise Conflict("AUCTION_LOT_MISSING", "No unconsumed lot is held for this auction.")
+    if not internal:
+        auctions = optional_gateway(AuctionGateway, session)
+        if auctions is not None:
+            auctions.ensure_lot_releasable(auction_id)
     stock = col(MarketListing.stock_remaining)
     session.exec(  # type: ignore[call-overload]
         update(MarketListing)

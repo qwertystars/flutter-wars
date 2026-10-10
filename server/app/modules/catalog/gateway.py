@@ -4,8 +4,10 @@ from typing import Literal
 
 from sqlmodel import Session
 
+from app.contracts.auction import AuctionGateway
 from app.contracts.catalog import WidgetInfo
-from app.contracts.marketplace_errors import InvalidListing, port_errors
+from app.contracts.marketplace_errors import InvalidListing, ResaleNotAllowed, port_errors
+from app.core.services import optional_gateway
 from app.modules.catalog import service
 from app.modules.catalog.models import Widget
 
@@ -37,6 +39,9 @@ class CatalogGatewayImpl:
         """Buying and awarding need an active widget; resale accepts an archived one."""
         with port_errors(_PORT_ERRORS):
             if operation == "sell":
+                auctions = optional_gateway(AuctionGateway, self.session)
+                if auctions is not None and auctions.widget_is_exclusive(widget_id):
+                    raise ResaleNotAllowed("Auction-exclusive widgets cannot be resold.")
                 service.get_widget(self.session, widget_id)
             else:
                 service.require_active_widget(self.session, widget_id)

@@ -11,10 +11,12 @@ from app.modules.inventory.errors import DuplicateReference
 from app.modules.inventory.models import InventoryEvent, TeamWidgetInventory
 
 
-def get_quantity(s: Session, team_id: UUID, widget_id: str) -> int:
+def get_quantity(s: Session, team_id: UUID, widget_id: str, *, lock: bool = False) -> int:
     stmt = select(TeamWidgetInventory.quantity).where(
         TeamWidgetInventory.team_id == team_id, TeamWidgetInventory.widget_id == widget_id
     )
+    if lock:
+        stmt = stmt.with_for_update()
     q = s.exec(stmt).first()
     return int(q) if q is not None else 0
 

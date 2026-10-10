@@ -32,31 +32,18 @@ Strategies are pure functions of `PricingInput(base_price, current_price, bought
 
 The price is always `base_price`. Use it for fixed-price and infinite listings.
 
-### `dynamic` (supply-demand)
+### `dynamic` (bounded retained demand)
 
-Every `interval_seconds` after the round opens:
-
-```
-demand  = units_bought − units_sold during the interval   (min 0)
-ratio   = demand / (supply_at_interval_start × target_fraction)
-price   = current_price × multiplier(ratio)     # first band with ratio < below
-price   = round_half_up(price / price_step) × price_step
-price   = clamp(price, ceil(base × min_factor), floor(base × max_factor))   # both on the step grid
-```
-
-| Param | Default | Meaning |
-|---|---|---|
-| `interval_seconds` | 120 | Repricing period (10 s to 1 day). Locked once the round opens. |
-| `target_fraction` | 0.1 | Share of remaining stock per interval treated as "normal" demand. |
-| `bands` | `<0.5→×0.9, <1→×1, <1.5→×1.15, <2→×1.3, else ×1.5` | Ascending `below` bounds; the last band is the catch-all with `below: null`. |
-| `min_factor` / `max_factor` | 0.75 / 2.0 | Price guard rails relative to `base_price`. |
-| `price_step` | 5 | Prices are multiples of this. |
-
-The bands and guard rails follow the provisional rules in the earlier event_12th backend, but per interval rather than per round. A sold-out listing (supply 0) keeps its price. Dynamic pricing on infinite supply is rejected (`PRICING_REQUIRES_FINITE_SUPPLY`).
+Prices move toward a custom target determined by net retained units, including prior
+round demand. They stay within 98–102% of base, with at most 1% of base movement per
+interval. Default interval: 120 seconds; default target demand fraction: 0.1.
+The old multiplier bands have been removed. Dynamic pricing requires finite supply.
+See [market safeguards](market-safeguards.md) for the formula, parameter bounds,
+resale settlement rules, research rationale, and migration behavior.
 
 ## How repricing runs: lazy, no scheduler
 
-Interval *k* covers `[opened_at + k·I, opened_at + (k+1)·I)`, ending at `closed_at` once the round closes. Nothing runs on a timer. Instead:
+Interval *k* covers `[opened_at + paused_seconds + k·I, opened_at + paused_seconds + (k+1)·I)`. The clock freezes at `paused_at` while paused and ends at `closed_at` when closed. Nothing runs on a timer. Instead:
 
 - **Reads** (`quote`, the listing endpoints) compute the price at `now` from the stored state without writing anything.
 - **Mutations** (`get_current_price`, `record_trade`, `update_params`) lock the `listing_pricing` row `FOR UPDATE`, apply every boundary that has passed in order, and persist the result inside the caller's transaction. If that transaction rolls back, the price change rolls back too.
@@ -117,12 +104,10 @@ I/J call this through `app/modules/pricing/gateway.py` (`PricingGatewayImpl`, th
   - Transaction (I) for prices and recording trades.
   - Admin (K) through the routes above.
 
-## Decisions that need lead/team approval (spec TBDs)
+## Current decisions
 
-1. **Formula and defaults** above, especially `target_fraction` and the band table. These are tuning knobs and can be changed per listing without code changes.
-2. **Trigger:** time-based intervals anchored at `opened_at`. The clock keeps running while a round is paused, so a long pause settles as quiet intervals and the price decays toward `min_factor`. The alternative is to freeze the clock during pauses, which needs accumulated pause time stored on the round.
-3. **Price history is kept**, but only rows where the price changes.
-4. **Guard rails** are 0.75× to 2× base by default, configurable per listing.
-5. **Resale effect:** units sold back count as negative demand in the interval. The resale price and brokerage formula still need a decision. They belong to I, and if they should depend on the market price, they would call `get_current_price`.
-6. **Interval length is locked once a round opens**, because changing it would move every boundary.
-7. **Trade time:** the caller's `now` (request time) with no-rewind, versus the time the pricing lock is acquired. See "Trade time vs lock wait" above.
+Dynamic formula and safety ceilings follow the October 10 meeting clarification.
+Pause time is excluded, retained prior demand carries forward, price history remains
+append-only, and interval length stays locked after opening. Request-time pricing
+with no rewind remains the execution contract. Resale proceeds are protected and
+bounded by Module I's accounting, separately from the common public quote.

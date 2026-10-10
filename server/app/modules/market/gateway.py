@@ -48,6 +48,10 @@ def listing_facts_view() -> Any:
             col(MarketRound.status).label("round_status"),
             col(MarketRound.opened_at).label("opened_at"),
             col(MarketRound.closed_at).label("closed_at"),
+            col(MarketRound.paused_at).label("paused_at"),
+            col(MarketRound.paused_seconds).label("paused_seconds"),
+            col(MarketListing.supply_total).label("supply_total"),
+            col(MarketListing.demand_seed).label("demand_seed"),
         )
         .join(MarketRound, col(MarketRound.id) == MarketListing.round_id)
         .subquery("listing_facts")
@@ -123,6 +127,10 @@ class MarketGatewayImpl:
             round_status=RoundStatus(rnd.status),
             opened_at=rnd.opened_at,
             closed_at=rnd.closed_at,
+            paused_at=rnd.paused_at,
+            paused_seconds=rnd.paused_seconds,
+            supply_total=listing.supply_total,
+            demand_seed=listing.demand_seed,
         )
 
     def listing_stock(self, listing_id: UUID) -> int | None:
@@ -186,4 +194,4 @@ class MarketGatewayImpl:
 
     def release_auction_lot(self, *, auction_id: UUID) -> None:
         with port_errors(_PORT_ERRORS):
-            service.release_auction_lot(self.session, auction_id)
+            service.release_auction_lot(self.session, auction_id, internal=True)

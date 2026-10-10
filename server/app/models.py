@@ -18,7 +18,7 @@ from app.modules.market.models import (  # G
     MarketRoundEvent,
 )
 from app.modules.pricing.models import ListingPricing, PriceHistory  # H
-from app.trading.models import TradeTransaction  # I
+from app.trading.models import ResaleAccount, ResalePosition, TradeTransaction  # I
 
 __all__ = [
     "AdminActionLog",
@@ -44,6 +44,8 @@ __all__ = [
     "TeamWallet",
     "TeamWidgetInventory",
     "TradeTransaction",
+    "ResaleAccount",
+    "ResalePosition",
     "UserIdentity",
     "Widget",
 ]

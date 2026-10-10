@@ -29,7 +29,7 @@ def _alembic(*args: str, database_url: str | None) -> subprocess.CompletedProces
     return subprocess.run([ALEMBIC, *args], cwd=SERVER_DIR, env=env, capture_output=True, text=True)
 
 
-HEAD = "0009_trading_auction"
+HEAD = "0010_market_safeguards"
 
 
 @pytest.fixture()
@@ -76,3 +76,48 @@ def test_missing_configuration_fails_clearly():
     result = _alembic("upgrade", "head", database_url=None)
     assert result.returncode != 0
     assert "DATABASE_URL" in (result.stdout + result.stderr)
+
+
+def test_legacy_inventory_gets_conservative_cost_basis(clean_db):
+    from uuid import uuid4
+
+    from sqlalchemy import MetaData, Table, create_engine, select
+
+    from app.modules.authentication.model import Team
+    from app.modules.catalog.models import Widget
+    from app.modules.inventory.models import TeamWidgetInventory
+    from app.trading.models import TradeTransaction, TradeType
+
+    result = _alembic("upgrade", "0009_trading_auction", database_url=clean_db)
+    assert result.returncode == 0, result.stderr
+    engine = create_engine(clean_db)
+    metadata = MetaData()
+    team = Team(name="Legacy team")
+    widget = Widget(id="legacy_button", appdev_key="appdev.legacy", display_name="Legacy", category="input")
+    with engine.begin() as connection:
+        for model in (team, widget, TeamWidgetInventory(team_id=team.id, widget_id=widget.id, quantity=4)):
+            table = Table(model.__tablename__, metadata, autoload_with=connection)
+            values = {k: v for k, v in model.model_dump().items() if k in table.c and v is not None}
+            connection.execute(table.insert().values(**values))
+        for unit in (100, 200):
+            trade = TradeTransaction(
+                team_id=team.id,
+                listing_id=uuid4(),
+                widget_id=widget.id,
+                idempotency_key=uuid4(),
+                transaction_type=TradeType.BUY,
+                quantity=5,
+                unit_price=unit,
+                gross_amount=unit * 5,
+                brokerage_amount=0,
+                final_amount=unit * 5,
+            )
+            table = Table(trade.__tablename__, metadata, autoload_with=connection)
+            connection.execute(table.insert().values(**trade.model_dump()))
+    result = _alembic("upgrade", "head", database_url=clean_db)
+    assert result.returncode == 0, result.stderr
+    with engine.connect() as connection:
+        position = Table("resale_position", MetaData(), autoload_with=connection)
+        row = connection.execute(select(position)).mappings().one()
+        assert (row["quantity"], row["cost"], row["external_units"], row["reward_units"]) == (4, 400, 0, 4)
+    engine.dispose()

@@ -37,5 +37,24 @@ class TradingGatewayImpl:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def net_units(self, widget_id: str) -> int:
+        from sqlalchemy import case, func
+        from sqlmodel import select
+
+        from app.trading.models import TradeTransaction, TradeType
+
+        signed = case(
+            (TradeTransaction.transaction_type == TradeType.BUY, TradeTransaction.quantity),
+            else_=-TradeTransaction.quantity,
+        )
+        return max(
+            0,
+            int(
+                self.session.exec(
+                    select(func.coalesce(func.sum(signed), 0)).where(TradeTransaction.widget_id == widget_id)
+                ).one()
+            ),
+        )
+
     def transaction_feed(self, query: TransactionQuery) -> dict[str, Any]:
         return transaction_feed(self.session, query)

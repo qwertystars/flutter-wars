@@ -1,10 +1,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, tuple_
+from sqlalchemy import case, func, tuple_
 from sqlmodel import Session, select
 
-from .models import TradeTransaction, TradeType
+from .models import ResaleAccount, ResalePosition, TradeTransaction, TradeType
 
 
 class TradeRepository:
@@ -49,9 +49,7 @@ class TradeRepository:
             ).all()
         )
 
-    def feed(
-        self, *, team_id: UUID | None, limit: int, before: tuple[datetime, UUID] | None
-    ) -> list[TradeTransaction]:
+    def feed(self, *, team_id: UUID | None, limit: int, before: tuple[datetime, UUID] | None) -> list[TradeTransaction]:
         """All teams' trades (or one team's), newest first, keyset-paginated."""
         statement = select(TradeTransaction)
         if team_id is not None:
@@ -63,8 +61,7 @@ class TradeRepository:
             )
         return list(
             self.session.exec(
-                statement.order_by(TradeTransaction.created_at.desc(), TradeTransaction.id.desc())
-                .limit(limit)
+                statement.order_by(TradeTransaction.created_at.desc(), TradeTransaction.id.desc()).limit(limit)
             ).all()
         )
 
@@ -75,3 +72,32 @@ class TradeRepository:
                 TradeTransaction.team_id == team_id,
             )
         ).one_or_none()
+
+    def external_units(self, team_id: UUID, widget_id: str) -> int:
+        signed = case(
+            (TradeTransaction.transaction_type == TradeType.BUY, TradeTransaction.quantity),
+            else_=-TradeTransaction.quantity,
+        )
+        return max(
+            0,
+            int(
+                self.session.exec(
+                    select(func.coalesce(func.sum(signed), 0)).where(
+                        TradeTransaction.team_id != team_id, TradeTransaction.widget_id == widget_id
+                    )
+                ).one()
+            ),
+        )
+
+    def resale_state(self, team_id: UUID, widget_id: str) -> tuple[ResaleAccount, ResalePosition]:
+        # The caller holds one team-wide transaction lock BEFORE any market lock.
+        account = self.session.get(ResaleAccount, team_id)
+        if account is None:
+            account = ResaleAccount(team_id=team_id)
+            self.session.add(account)
+        position = self.session.get(ResalePosition, (team_id, widget_id))
+        if position is None:
+            position = ResalePosition(team_id=team_id, widget_id=widget_id)
+            self.session.add(position)
+        self.session.flush()
+        return account, position

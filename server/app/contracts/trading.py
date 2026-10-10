@@ -15,6 +15,8 @@ class TransactionQuery:
 class TradingGateway(Protocol):
     OWNER: ClassVar[str] = "Module I transactions"
 
+    def net_units(self, widget_id: str) -> int: ...
+
     def transaction_feed(self, query: TransactionQuery) -> dict[str, Any]:
         """Newest first: {"items": [...], "next_cursor": str | None}."""
         ...

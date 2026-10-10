@@ -13,10 +13,13 @@ class PurchaseRequest(BaseModel):
     listing_id: UUID
     quantity: int = Field(strict=True, gt=0, le=MAX_CREDITS)
     idempotency_key: UUID
+    max_unit_price: int | None = Field(default=None, strict=True, ge=0, le=MAX_CREDITS)
 
 
 class SellRequest(PurchaseRequest):
     """Owner-approved resale destination listing, quantity, and retry key."""
+
+    min_final_amount: int | None = Field(default=None, strict=True, ge=0, le=MAX_CREDITS)
 
 
 class TradeResponse(BaseModel):

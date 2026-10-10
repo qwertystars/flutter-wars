@@ -36,10 +36,29 @@ class RoundStream(DurableObject):
         super().__init__(ctx, env)
         # Serialize async storage operations and broadcasts; idle locks do not prevent hibernation.
         self._lock = asyncio.Lock()
+        self._refresh_pending = False
 
     async def fetch(self, request):
-        async with self._lock:
+        refresh = request.method == "POST" and urlparse(request.url).path == "/refresh"
+        if refresh and self._refresh_pending:
+            return Response(None, status=204)
+        if refresh:
+            self._refresh_pending = True
+        try:
+            await self._lock.acquire()
+        except BaseException:
+            # Only the admitted waiter owns the pending flag; a cancelled waiter
+            # must not suppress later committed-change notifications forever.
+            if refresh:
+                self._refresh_pending = False
+            raise
+        try:
+            # Clear before sampling so a commit during the refresh can queue one successor.
+            if refresh:
+                self._refresh_pending = False
             return await self._fetch(request)
+        finally:
+            self._lock.release()
 
     def _app(self):
         from worker import get_app

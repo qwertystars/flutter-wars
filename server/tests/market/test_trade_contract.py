@@ -55,17 +55,11 @@ def make_round(
     return rnd, market.listings_for_round(session, rnd.id)
 
 
-def finite(
-    widget: Widget, supply: int = 100, price: int = 100, **pricing_kwargs
-) -> market.ListingSpec:
-    return market.ListingSpec(
-        widget_id=widget.id, base_price=price, supply=supply, **pricing_kwargs
-    )
+def finite(widget: Widget, supply: int = 100, price: int = 100, **pricing_kwargs) -> market.ListingSpec:
+    return market.ListingSpec(widget_id=widget.id, base_price=price, supply=supply, **pricing_kwargs)
 
 
-def dynamic(
-    widget: Widget, supply: int = 100, price: int = 100, params=DYNAMIC
-) -> market.ListingSpec:
+def dynamic(widget: Widget, supply: int = 100, price: int = 100, params=DYNAMIC) -> market.ListingSpec:
     return finite(widget, supply, price, pricing_strategy="dynamic", pricing_params=params)
 
 
@@ -81,10 +75,7 @@ def code_of(fn, *args, **kwargs) -> str:
 def test_round_state_is_checked_inside_mutation(session: Session, widgets: list[Widget]) -> None:
     rnd, (listing,) = make_round(session, widgets, finite(widgets[0]), open_at=None)
     # Draft listings do not exist as far as trading is concerned.
-    assert (
-        code_of(market.lock_listing_for_trade, session, listing.id, kind=RoundKind.TRADING)
-        == "LISTING_NOT_FOUND"
-    )
+    assert code_of(market.lock_listing_for_trade, session, listing.id, kind=RoundKind.TRADING) == "LISTING_NOT_FOUND"
     session.rollback()
     market.transition(session, rnd.id, "open", now=T0, actor="org")
     session.commit()
@@ -99,18 +90,12 @@ def test_round_state_is_checked_inside_mutation(session: Session, widgets: list[
 
 
 def test_unknown_listing(session: Session) -> None:
-    assert (
-        code_of(market.lock_listing_for_trade, session, uuid4(), kind=RoundKind.TRADING)
-        == "LISTING_NOT_FOUND"
-    )
+    assert code_of(market.lock_listing_for_trade, session, uuid4(), kind=RoundKind.TRADING) == "LISTING_NOT_FOUND"
 
 
 def test_round_kind_must_match(session: Session, widgets: list[Widget]) -> None:
     _, (listing,) = make_round(session, widgets, finite(widgets[0]), kind=RoundKind.AUCTION)
-    assert (
-        code_of(market.lock_listing_for_trade, session, listing.id, kind=RoundKind.TRADING)
-        == "WRONG_ROUND_KIND"
-    )
+    assert code_of(market.lock_listing_for_trade, session, listing.id, kind=RoundKind.TRADING) == "WRONG_ROUND_KIND"
     ok = market.lock_listing_for_trade(session, listing.id, kind=RoundKind.AUCTION)
     assert ok.round_kind == RoundKind.AUCTION and ok.stock_remaining == 100
 
@@ -145,10 +130,7 @@ def test_quantity_rules(session: Session, widgets: list[Widget]) -> None:
     _, (listing,) = make_round(session, widgets, spec)
     assert code_of(market.take_stock, session, listing.id, 3) == "QUANTITY_LIMIT_EXCEEDED"
     assert code_of(market.take_stock, session, listing.id, 0) == "INVALID_QUANTITY"
-    assert (
-        code_of(pricing.record_trade, session, listing.id, 0, TradeSide.BUY, T0)
-        == "INVALID_QUANTITY"
-    )
+    assert code_of(pricing.record_trade, session, listing.id, 0, TradeSide.BUY, T0) == "INVALID_QUANTITY"
     assert market.take_stock(session, listing.id, 2) == 48
 
 
@@ -179,39 +161,35 @@ def test_static_price_never_drifts(session: Session, widgets: list[Widget]) -> N
 
 def test_dynamic_price_follows_demand(session: Session, widgets: list[Widget]) -> None:
     _, (listing,) = make_round(session, widgets, dynamic(widgets[0], supply=100))
-    # Interval 0: 20 units against a target of 10 -> x1.5 at the 60s boundary.
+    # Net retained demand raises the price by at most one credit per boundary.
     assert buy(session, listing.id, 15, T0 + timedelta(seconds=5)) == 100
-    assert (
-        buy(session, listing.id, 5, T0 + timedelta(seconds=59)) == 100
-    )  # same interval, same price
-    assert buy(session, listing.id, 1, T0 + timedelta(seconds=60)) == 150
-    # Interval 1: 1 unit vs supply 80 -> ratio 0.125 -> x0.9 = 135.
+    assert buy(session, listing.id, 5, T0 + timedelta(seconds=59)) == 100  # same interval, same price
+    assert buy(session, listing.id, 1, T0 + timedelta(seconds=60)) == 101
+    # Retained units remain demand, even without another large purchase.
     quote = pricing.quote(session, listing.id, T0 + timedelta(seconds=125))
-    assert (quote.price, quote.interval_index) == (135, 2)
+    assert (quote.price, quote.interval_index) == (102, 2)
     assert quote.valid_until == T0 + timedelta(seconds=180)
 
     history = pricing.price_history(session, listing.id)
     assert [(h.reason, h.interval_index, h.price, h.demand, h.supply) for h in history] == [
         ("initial", 0, 100, None, None),
-        ("interval", 1, 150, 20, 100),
+        ("interval", 1, 101, 20, 100),
     ]
 
 
 def test_quiet_market_decays_to_floor_and_stops(session: Session, widgets: list[Widget]) -> None:
     _, (listing,) = make_round(session, widgets, dynamic(widgets[0]))
-    # 100 -> 90 -> 80 (81 rounds to 80) -> 75 (floor) and then stays.
-    prices = [
-        pricing.quote(session, listing.id, T0 + timedelta(seconds=60 * k)).price for k in range(6)
-    ]
-    assert prices == [100, 90, 80, 75, 75, 75]
+    # An empty market eases to the narrow floor, then stops.
+    prices = [pricing.quote(session, listing.id, T0 + timedelta(seconds=60 * k)).price for k in range(6)]
+    assert prices == [100, 99, 98, 98, 98, 98]
     # A day of silence settles instantly instead of looping per interval.
     q = pricing.get_current_price(session, listing.id, T0 + timedelta(days=1))
-    assert q.price == 75 and q.interval_index == 1440
+    assert q.price == 98 and q.interval_index == 1440
 
 
 def test_quote_is_read_only(session: Session, widgets: list[Widget]) -> None:
     _, (listing,) = make_round(session, widgets, dynamic(widgets[0]))
-    assert pricing.quote(session, listing.id, T0 + timedelta(minutes=10)).price == 75
+    assert pricing.quote(session, listing.id, T0 + timedelta(minutes=10)).price == 98
     session.expire_all()
     assert session.get(ListingPricing, listing.id).interval_index == 0
 
@@ -228,10 +206,7 @@ def test_lazy_settlement_matches_eager(session: Session, widgets: list[Widget]) 
             pricing.recalculate(session, a.id, T0 + timedelta(seconds=s))
         session.commit()
     end = T0 + timedelta(seconds=900)
-    assert (
-        pricing.get_current_price(session, a.id, end).price
-        == pricing.get_current_price(session, b.id, end).price
-    )
+    assert pricing.get_current_price(session, a.id, end).price == pricing.get_current_price(session, b.id, end).price
     assert [(h.interval_index, h.price) for h in pricing.price_history(session, a.id)] == [
         (h.interval_index, h.price) for h in pricing.price_history(session, b.id)
     ]
@@ -249,8 +224,8 @@ def test_sales_reduce_demand(session: Session, widgets: list[Widget]) -> None:
 def test_sold_out_listing_holds_price(session: Session, widgets: list[Widget]) -> None:
     _, (listing,) = make_round(session, widgets, dynamic(widgets[0], supply=10))
     buy(session, listing.id, 10, T0)
-    assert pricing.quote(session, listing.id, T0 + timedelta(seconds=60)).price == 150
-    assert pricing.quote(session, listing.id, T0 + timedelta(minutes=30)).price == 150
+    assert pricing.quote(session, listing.id, T0 + timedelta(seconds=60)).price == 101
+    assert pricing.quote(session, listing.id, T0 + timedelta(minutes=30)).price == 102
 
 
 def test_closing_freezes_price(session: Session, widgets: list[Widget]) -> None:
@@ -259,32 +234,27 @@ def test_closing_freezes_price(session: Session, widgets: list[Widget]) -> None:
     market.transition(session, rnd.id, "close", now=T0 + timedelta(seconds=90), actor="org")
     session.commit()
     quote = pricing.quote(session, listing.id, T0 + timedelta(hours=5))
-    assert (quote.price, quote.interval_index, quote.valid_until) == (150, 1, None)
+    assert (quote.price, quote.interval_index, quote.valid_until) == (101, 1, None)
 
 
 def test_param_change_mid_round(session: Session, widgets: list[Widget]) -> None:
     _, (listing,) = make_round(session, widgets, dynamic(widgets[0]))
     buy(session, listing.id, 20, T0)
     later = T0 + timedelta(seconds=130)
-    # Elapsed intervals settle under the old params (100 -> 150 -> 135) before the change.
-    pricing.update_params(session, listing.id, DYNAMIC | {"max_factor": "1.2"}, later)
+    # Elapsed intervals settle under the old parameters (100 -> 101 -> 102).
+    pricing.update_params(session, listing.id, DYNAMIC | {"max_factor": "1.01"}, later)
     session.commit()
     state = session.get(ListingPricing, listing.id)
-    assert (state.current_price, state.interval_index, state.params_version) == (135, 2, 2)
-    # New cap applies from the next boundary: 135 * 0.9 = 121.5 -> 120 (cap 120).
-    assert pricing.quote(session, listing.id, T0 + timedelta(seconds=180)).price == 120
+    assert (state.current_price, state.interval_index, state.params_version) == (102, 2, 2)
+    # The tightened bound applies at the next boundary.
+    assert pricing.quote(session, listing.id, T0 + timedelta(seconds=180)).price == 101
 
     assert (
-        code_of(
-            pricing.update_params, session, listing.id, DYNAMIC | {"interval_seconds": 30}, later
-        )
+        code_of(pricing.update_params, session, listing.id, DYNAMIC | {"interval_seconds": 30}, later)
         == "PRICING_INTERVAL_LOCKED"
     )
     session.rollback()
-    assert (
-        code_of(pricing.update_params, session, listing.id, {"bogus": 1}, later)
-        == "INVALID_PRICING_PARAMS"
-    )
+    assert code_of(pricing.update_params, session, listing.id, {"bogus": 1}, later) == "INVALID_PRICING_PARAMS"
     session.rollback()
     reasons = [h.reason for h in pricing.price_history(session, listing.id)]
     assert reasons == ["initial", "interval", "interval", "config_change"]
@@ -299,7 +269,7 @@ def test_old_history_is_not_rewritten(session: Session, widgets: list[Widget]) -
     pricing.update_params(
         session,
         listing.id,
-        DYNAMIC | {"bands": [{"multiplier": "2"}], "max_factor": "5"},
+        DYNAMIC | {"target_fraction": "0.2", "max_factor": "1.01"},
         T0 + timedelta(seconds=61),
     )
     session.commit()
@@ -331,23 +301,20 @@ def test_api_pricing_endpoints(api, widgets: list[Widget], clock) -> None:
 
     # Draft: strategy may change.
     assert api.patch(url, json={"strategy": "static"}).json()["strategy"] == "static"
-    assert (
-        api.patch(url, json={"strategy": "dynamic", "params": DYNAMIC}).json()["params_version"]
-        == 3
-    )
+    assert api.patch(url, json={"strategy": "dynamic", "params": DYNAMIC}).json()["params_version"] == 3
     api.post(f"/admin/market/rounds/{rnd['id']}/open")
 
     clock.advance(seconds=61)
     api.as_(PARTICIPANT)
     price = api.get(f"/market/listings/{listing_id}/price").json()
-    assert price["price"] == 90 and price["interval_index"] == 1
+    assert price["price"] == 99 and price["interval_index"] == 1
     assert price["valid_until"].startswith("2026-10-12T09:02:00")
 
     api.as_(ORGANIZER)
     locked = api.patch(url, json={"strategy": "static"})
     assert locked.status_code == 409 and locked.json()["error"]["code"] == "PRICING_STRATEGY_LOCKED"
     updated = api.patch(url, json={"params": DYNAMIC | {"price_step": 1}}).json()
-    assert updated["current_price"] == 90 and updated["interval_index"] == 1
+    assert updated["current_price"] == 99 and updated["interval_index"] == 1
     history = api.get(f"/admin/market/listings/{listing_id}/price-history").json()
     assert [h["reason"] for h in history] == ["initial", "interval", "config_change"]
 

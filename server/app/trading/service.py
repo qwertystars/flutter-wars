@@ -10,11 +10,13 @@ from app.contracts.marketplace import (
     PricingPort,
 )
 from app.contracts.marketplace_errors import ConfigurationRequired, NotFound
+from app.core.errors import AppError
 from app.core.transactions import lock_request, require_transaction
 
 from .errors import AmountTooLarge, IdempotencyConflict, InvalidPrice
 from .models import TradeTransaction, TradeType
 from .repository import TradeRepository
+from .risk import ResaleRules
 from .schemas import PurchaseRequest, SellRequest
 
 
@@ -31,6 +33,7 @@ class TradingService:
         inventory: InventoryPort,
         catalog: CatalogPort,
         brokerage: BrokeragePolicy | None = None,
+        resale_rules: ResaleRules | None = None,
     ):
         self._trades = trades
         self._market = market
@@ -39,6 +42,7 @@ class TradingService:
         self._inventory = inventory
         self._catalog = catalog
         self._brokerage = brokerage
+        self._resale_rules = resale_rules
 
     def _get_existing(self, *, team_id: UUID, request: PurchaseRequest, kind: TradeType) -> TradeTransaction | None:
         existing = self._trades.get_by_idempotency_key(
@@ -66,10 +70,40 @@ class TradingService:
     def sell(self, *, team_id: UUID, request: SellRequest) -> TradeTransaction:
         return self._trade(team_id=team_id, request=request, kind=TradeType.SELL)
 
+    def resale_quote(self, *, team_id: UUID, request: SellRequest) -> dict:
+        require_transaction(self._trades.session)
+        if self._resale_rules is None:
+            raise ConfigurationRequired()
+        lock_request(self._trades.session, scope=f"resale-account:{team_id}")
+        listing = self._market.get_for_resale(listing_id=request.listing_id, quantity=request.quantity)
+        self._catalog.validate_widget(widget_id=listing.widget_id, operation="sell")
+        price, gross = self._get_purchase_amounts(request=request)
+        self._ledger.lock_accounts(team_ids=[team_id])
+        owned = self._inventory.owned_quantity(team_id, listing.widget_id)
+        if request.quantity > owned:
+            from app.contracts.marketplace_errors import InsufficientInventory
+
+            raise InsufficientInventory()
+        account, position = self._trades.resale_state(team_id, listing.widget_id)
+        self._resale_rules.synchronize(position, owned)
+        return self._resale_rules.quote(
+            position,
+            account,
+            quantity=request.quantity,
+            gross=gross,
+            external=self._trades.external_units(team_id, listing.widget_id),
+            funding=self._ledger.initial_funding(team_id),
+            gift_unit_price=self._market.lock_listing_facts(request.listing_id).base_price
+            if request.quantity > position.quantity
+            else 0,
+        ) | {"unit_price": price}
+
     def _trade(self, *, team_id: UUID, request: PurchaseRequest, kind: TradeType) -> TradeTransaction:
         require_transaction(self._trades.session)
-        request = PurchaseRequest.model_validate(request.model_dump())
+        request = (SellRequest if kind == TradeType.SELL else PurchaseRequest).model_validate(request.model_dump())
         lock_request(self._trades.session, scope=f"trade:{team_id}:{kind.value}:{request.idempotency_key}")
+        if self._resale_rules is not None:
+            lock_request(self._trades.session, scope=f"resale-account:{team_id}")
         existing = self._get_existing(team_id=team_id, request=request, kind=kind)
         if existing:
             return existing
@@ -86,7 +120,7 @@ class TradingService:
         self._catalog.validate_widget(widget_id=listing.widget_id, operation="buy" if kind == TradeType.BUY else "sell")
         price, gross = self._get_purchase_amounts(request=request)
         fee = 0
-        if kind == TradeType.SELL:
+        if kind == TradeType.SELL and self._resale_rules is None:
             fee = self._brokerage.fee(
                 team_id=team_id,
                 listing=listing,
@@ -97,6 +131,36 @@ class TradingService:
             )
             if type(fee) is not int or not 0 <= fee <= gross:
                 raise ConfigurationRequired("Brokerage must return a valid whole-credit fee.")
+        self._ledger.lock_accounts(team_ids=[team_id])
+        if self._resale_rules is not None:
+            if kind == TradeType.BUY and request.max_unit_price is not None and price > request.max_unit_price:
+                raise AppError("PRICE_LIMIT_EXCEEDED", "The price increased; refresh your quote.", 409)
+            account, position = self._trades.resale_state(team_id, listing.widget_id)
+            self._resale_rules.synchronize(position, self._inventory.owned_quantity(team_id, listing.widget_id))
+            external = self._trades.external_units(team_id, listing.widget_id)
+            if kind == TradeType.SELL:
+                settlement = self._resale_rules.quote(
+                    position,
+                    account,
+                    quantity=request.quantity,
+                    gross=gross,
+                    external=external,
+                    funding=self._ledger.initial_funding(team_id),
+                    gift_unit_price=self._market.lock_listing_facts(request.listing_id).base_price
+                    if request.quantity > position.quantity
+                    else 0,
+                )
+                fee = gross - settlement["final_amount"]
+                if request.min_final_amount is not None and settlement["final_amount"] < request.min_final_amount:
+                    raise AppError("PRICE_LIMIT_EXCEEDED", "Resale proceeds decreased; refresh your quote.", 409)
+                self._resale_rules.consume(position, account, settlement)
+            else:
+                if position.quantity == 0:
+                    position.reward_units = 0
+                position.reward_units += request.quantity
+                position.quantity += request.quantity
+                position.cost += gross
+                position.external_units += external * request.quantity
         trade = TradeTransaction.model_validate(
             dict(
                 team_id=team_id,
@@ -111,7 +175,6 @@ class TradingService:
                 idempotency_key=request.idempotency_key,
             )
         )
-        self._ledger.lock_accounts(team_ids=[team_id])
         if kind == TradeType.BUY:
             self._ledger.debit(team_id=team_id, amount=trade.final_amount, trade_id=trade.id)
             self._market.consume_stock(listing_id=listing.listing_id, quantity=request.quantity, trade_id=trade.id)

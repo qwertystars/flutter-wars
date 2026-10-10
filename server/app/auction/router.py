@@ -1,9 +1,10 @@
 from collections.abc import Callable
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from app.contracts.admin import OrganizerPrincipal
 from app.integration.runtime import BackendModules
 
 from .schemas import AuctionCreate, AuctionView, BidRequest, MyBid, SettlementResponse
@@ -13,10 +14,34 @@ class MinimumBidRequest(BaseModel):
     amount: int = Field(strict=True, ge=0, le=2147483647)
 
 
-def build_router(
-    runtime_dependency: Callable, team_dependency: Callable, organizer_dependency: Callable
-) -> APIRouter:
+def build_router(runtime_dependency: Callable, team_dependency: Callable, organizer_dependency: Callable) -> APIRouter:
     router = APIRouter(tags=["auction"])
+
+    @router.get("/auctions", response_model=list[AuctionView])
+    def auctions(
+        limit: int = Query(50, ge=1, le=100),
+        offset: int = Query(0, ge=0),
+        runtime: BackendModules = Depends(runtime_dependency),
+        team_id: UUID = Depends(team_dependency),
+    ):
+        return runtime.auctions(admin=False, limit=limit, offset=offset)
+
+    @router.get("/admin/auctions", response_model=list[AuctionView])
+    def admin_auctions(
+        limit: int = Query(50, ge=1, le=100),
+        offset: int = Query(0, ge=0),
+        runtime: BackendModules = Depends(runtime_dependency),
+        actor: OrganizerPrincipal = Depends(organizer_dependency),
+    ):
+        return runtime.auctions(admin=True, limit=limit, offset=offset)
+
+    @router.post("/admin/auctions/{auction_id}/cancel", response_model=AuctionView)
+    def cancel(
+        auction_id: UUID,
+        runtime: BackendModules = Depends(runtime_dependency),
+        actor: OrganizerPrincipal = Depends(organizer_dependency),
+    ):
+        return runtime.auction_transition(auction_id, "cancel", actor=actor)
 
     @router.get("/auctions/{auction_id}", response_model=AuctionView)
     def view(
@@ -43,27 +68,37 @@ def build_router(
     ):
         return runtime.bid(team_id, auction_id, request)
 
-    @router.post(
-        "/admin/auctions", response_model=AuctionView, dependencies=[Depends(organizer_dependency)]
-    )
-    def create(request: AuctionCreate, runtime: BackendModules = Depends(runtime_dependency)):
-        return runtime.create_auction(request)
+    @router.post("/admin/auctions", response_model=AuctionView, dependencies=[Depends(organizer_dependency)])
+    def create(
+        request: AuctionCreate,
+        runtime: BackendModules = Depends(runtime_dependency),
+        actor: OrganizerPrincipal = Depends(organizer_dependency),
+    ):
+        return runtime.create_auction(request, actor=actor)
 
     @router.post(
         "/admin/auctions/{auction_id}/open",
         response_model=AuctionView,
         dependencies=[Depends(organizer_dependency)],
     )
-    def open_auction(auction_id: UUID, runtime: BackendModules = Depends(runtime_dependency)):
-        return runtime.auction_transition(auction_id, "open")
+    def open_auction(
+        auction_id: UUID,
+        runtime: BackendModules = Depends(runtime_dependency),
+        actor: OrganizerPrincipal = Depends(organizer_dependency),
+    ):
+        return runtime.auction_transition(auction_id, "open", actor=actor)
 
     @router.post(
         "/admin/auctions/{auction_id}/close",
         response_model=AuctionView,
         dependencies=[Depends(organizer_dependency)],
     )
-    def close_auction(auction_id: UUID, runtime: BackendModules = Depends(runtime_dependency)):
-        return runtime.auction_transition(auction_id, "close")
+    def close_auction(
+        auction_id: UUID,
+        runtime: BackendModules = Depends(runtime_dependency),
+        actor: OrganizerPrincipal = Depends(organizer_dependency),
+    ):
+        return runtime.auction_transition(auction_id, "close", actor=actor)
 
     @router.patch(
         "/admin/auctions/{auction_id}/minimum-bid",
@@ -73,16 +108,21 @@ def build_router(
     def minimum(
         auction_id: UUID,
         request: MinimumBidRequest,
+        actor: OrganizerPrincipal = Depends(organizer_dependency),
         runtime: BackendModules = Depends(runtime_dependency),
     ):
-        return runtime.auction_transition(auction_id, "minimum", amount=request.amount)
+        return runtime.auction_transition(auction_id, "minimum", amount=request.amount, actor=actor)
 
     @router.post(
         "/admin/auctions/{auction_id}/settle",
         response_model=SettlementResponse,
         dependencies=[Depends(organizer_dependency)],
     )
-    def settle(auction_id: UUID, runtime: BackendModules = Depends(runtime_dependency)):
-        return runtime.settle(auction_id)
+    def settle(
+        auction_id: UUID,
+        runtime: BackendModules = Depends(runtime_dependency),
+        actor: OrganizerPrincipal = Depends(organizer_dependency),
+    ):
+        return runtime.settle(auction_id, actor=actor)
 
     return router

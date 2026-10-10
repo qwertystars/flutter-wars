@@ -15,6 +15,7 @@ from the environment or `.env`; in the Worker, from `vars` in `wrangler.jsonc` a
 | `JWT_ALGORITHM`, `JWT_ACCESS_TOKEN_MINUTES` | no | `vars` | |
 | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_REDIRECT_URI` | no | `vars` | the client ID is the token audience |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | yes | `wrangler secret put` | server-side sign-in only |
+| `RESALE_PROFIT_BPS`, `RESALE_EVENT_PROFIT_BPS`, `RESALE_MAX_LOSS_BPS` | no | optional `vars` | defaults/ceilings: 500, 200, 500; see [safeguards](market-safeguards.md) |
 
 The variables below (`APP_ENV`, `DB_*`) configure the Module M helpers in `app/infra`
 and the operational scripts.
@@ -64,9 +65,10 @@ There are no Wrangler staging/production environments.
 
 ## Worker runtime secrets
 
-**None required.** The `HYPERDRIVE` binding carries the database credentials.
-`APP_ENV` is a non-sensitive plain `var`. If a runtime secret is ever added, set it
-with `wrangler secret put <KEY>` from `cloudflare/`; locally use `cloudflare/.dev.vars`.
+The `HYPERDRIVE` binding carries database credentials. `JWT_SECRET_KEY` is required
+for authentication, and `GOOGLE_OAUTH_CLIENT_SECRET` is used for server-side Google
+sign-in. Preserve existing secrets during deployments. Configure them with
+`wrangler secret put <KEY>` from `cloudflare/`; locally use ignored `.dev.vars`.
 
 ## Rules
 

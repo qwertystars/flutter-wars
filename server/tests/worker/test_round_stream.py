@@ -245,3 +245,55 @@ def test_worker_notifies_only_after_successful_mutations(sdk, monkeypatch, metho
         assert bool(notified) == notify
 
     asyncio.run(scenario())
+
+
+def test_refresh_burst_queues_only_one_successor_and_samples_latest_commit(sdk, monkeypatch):
+    stream, _, _ = sdk
+
+    async def run():
+        obj = stream.RoundStream(Context(), None)
+        entered, release = asyncio.Event(), asyncio.Event()
+        calls = []
+        revision = [1]
+
+        async def fetch(request):
+            calls.append(revision[0])
+            if len(calls) == 1:
+                entered.set()
+                await release.wait()
+            return stream.Response(None, status=204)
+
+        monkeypatch.setattr(obj, "_fetch", fetch)
+        request = _request(uuid4(), method="POST", path="/refresh")
+        first = asyncio.create_task(obj.fetch(request))
+        await entered.wait()
+        burst = [asyncio.create_task(obj.fetch(request)) for _ in range(100)]
+        await asyncio.sleep(0)
+        revision[0] = 101
+        release.set()
+        responses = await asyncio.gather(first, *burst)
+        assert all(r.status == 204 for r in responses)
+        assert calls == [1, 101]
+        assert not obj._refresh_pending
+
+    asyncio.run(run())
+
+
+def test_cancelled_refresh_waiter_does_not_suppress_future_notifications(sdk, monkeypatch):
+    stream, _, _ = sdk
+
+    async def run():
+        obj = stream.RoundStream(Context(), None)
+        await obj._lock.acquire()
+        request = _request(uuid4(), method="POST", path="/refresh")
+        waiter = asyncio.create_task(obj.fetch(request))
+        await asyncio.sleep(0)
+        assert obj._refresh_pending
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert not obj._refresh_pending
+        obj._lock.release()
+        assert (await obj.fetch(request)).status == 204
+
+    asyncio.run(run())

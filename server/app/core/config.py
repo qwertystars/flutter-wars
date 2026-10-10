@@ -20,26 +20,22 @@ class Settings(BaseSettings):
     environment: str = Field(validation_alias="ENVIRONMENT")
     log_level: str = Field(validation_alias="LOG_LEVEL")
     database_url: SecretStr = Field(validation_alias="DATABASE_URL")
-    database_connect_timeout_seconds: int = Field(
-        validation_alias="DATABASE_CONNECT_TIMEOUT_SECONDS", ge=1, le=120
-    )
+    database_connect_timeout_seconds: int = Field(validation_alias="DATABASE_CONNECT_TIMEOUT_SECONDS", ge=1, le=120)
     database_pool_size: int = Field(validation_alias="DATABASE_POOL_SIZE", ge=1, le=50)
     database_max_overflow: int = Field(validation_alias="DATABASE_MAX_OVERFLOW", ge=0, le=100)
     jwt_secret_key: SecretStr = Field(validation_alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(validation_alias="JWT_ALGORITHM")
-    jwt_access_token_minutes: int = Field(
-        validation_alias="JWT_ACCESS_TOKEN_MINUTES", ge=1, le=1440
-    )
-    google_oauth_client_id: str | None = Field(
-        default=None, validation_alias="GOOGLE_OAUTH_CLIENT_ID"
-    )
-    google_oauth_client_secret: SecretStr | None = Field(
-        default=None, validation_alias="GOOGLE_OAUTH_CLIENT_SECRET"
-    )
+    jwt_access_token_minutes: int = Field(validation_alias="JWT_ACCESS_TOKEN_MINUTES", ge=1, le=1440)
+    google_oauth_client_id: str | None = Field(default=None, validation_alias="GOOGLE_OAUTH_CLIENT_ID")
+    google_oauth_client_secret: SecretStr | None = Field(default=None, validation_alias="GOOGLE_OAUTH_CLIENT_SECRET")
     google_oauth_redirect_uri: str = Field(
         default="http://localhost:8000/auth/google/callback",
         validation_alias="GOOGLE_OAUTH_REDIRECT_URI",
     )
+
+    resale_profit_bps: int = Field(default=500, ge=0, le=500, validation_alias="RESALE_PROFIT_BPS")
+    resale_event_profit_bps: int = Field(default=200, ge=0, le=200, validation_alias="RESALE_EVENT_PROFIT_BPS")
+    resale_max_loss_bps: int = Field(default=500, ge=0, le=500, validation_alias="RESALE_MAX_LOSS_BPS")
 
     @property
     def database_dsn(self) -> str:

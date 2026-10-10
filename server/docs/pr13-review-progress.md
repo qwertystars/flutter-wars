@@ -19,8 +19,26 @@ The agreed order is service boundaries, performance, then live price delivery. C
 
 Validation: all 468 PostgreSQL 18 tests pass with `PGTZ=UTC`, including cache concurrency/rollback, socket authorization, reconnect, and alarm coverage. Ruff and Worker packaging pass. A real local workerd smoke check covers successful and rejected trades, interval alarms, reconnects, round closure, and revoked team access.
 
-See [market stream and cache documentation](market-stream.md) for client protocol, limits, and performance tradeoffs. Existing dynamic supply/demand pricing retains its formula.
+See [market stream and cache documentation](market-stream.md) for client protocol, limits, and performance tradeoffs. The October 10 safeguards update replaces the provisional dynamic formula; see [market safeguards](market-safeguards.md) for the research, rules, reviewed failure cases, and migration limits.
 
 ## Deployment status
 
-Changes target PR #13 on `integration/staging-backend`. Local runtime validation does not deploy to staging or production. The reviewer reply remains unposted pending user approval.
+Changes target upstream PR #13 through the fork's `integration/staging-backend` branch.
+Staging releases use the `flutter-wars-staging` Worker and its existing RoundStream
+Durable Object binding. Apply the direct-Neon migration before Worker publishing,
+and verify health/readiness before restoring the prior operational freeze state.
+Deployment version IDs and the active release are available in the Cloudflare dashboard.
+
+
+## October 10 safeguards update
+
+Self-pump resale gains are excluded using cross-round acquisition cost and external
+net-demand accounting. Legitimate gains and losses have finite team-wide limits.
+The update also fixes pause-time decay, missing auction discovery, live-lot release,
+cancellation refunds, zero-wallet resale, disabled-team IDE access, missing mutation
+audits, redundant transaction connections, and Durable Object refresh queues.
+
+Validation: 488 PostgreSQL tests pass, including legacy migration backfill, adversarial
+trading and concurrent inventory/credit operations. Ruff and the Worker dry-run pass.
+This records tested safeguards and known migration limits, not an assertion that the
+entire repository is free of vulnerabilities.
