@@ -54,7 +54,7 @@ GET /market/listings
   "round": {"id": 1, "sequence": 1, "name": "Round 1", "kind": "trading", "status": "open",
             "opened_at": "2026-10-12T09:00:00Z", "paused_at": null, "closed_at": null, ...},
   "listings": [
-    {"id": 1, "round_id": 1, "widget_id": 3, "widget_name": "Button", "base_price": 100,
+    {"id": 1, "round_id": 1, "widget_id": 3, "widget_name": "Button", "description": "An interactive button.", "base_price": 100,
      "infinite_supply": false, "supply_total": 10, "stock_remaining": 7, "sold_out": false,
      "max_per_purchase": null,
      "price": {"amount": 115, "strategy": "dynamic", "interval_index": 4,
@@ -65,6 +65,12 @@ GET /market/listings
   "server_time": "2026-10-12T09:08:12Z"
 }
 ```
+
+`description` is the optional catalog description (up to 500 characters), or `null` when unset.
+It is also returned with widget details at `/widgets` and with each item at `/inventory`.
+Organizers set or update it through `/admin/widgets`; omitting it in a PATCH preserves
+the current value, and sending `null` clears it. The column already exists in migration
+`0003_catalog`, so this API expansion requires no additional database migration.
 
 ## Organizer API (organizer role; every route is under `/admin/market`)
 

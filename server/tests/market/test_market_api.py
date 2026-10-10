@@ -99,7 +99,10 @@ def test_round_requires_market(api: Api, widgets: list[Widget]) -> None:
     assert error_code(response) == "NO_ACTIVE_MARKET"
 
 
-def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
+def test_full_lifecycle(api: Api, widgets: list[Widget], clock, session) -> None:
+    widgets[0].description = "An interactive button."
+    session.add(widgets[0])
+    session.commit()
     setup_market(api)
     rnd = create_round(api, widgets)
     assert rnd["status"] == "draft" and rnd["sequence"] == 1 and rnd["version"] == 1
@@ -108,6 +111,8 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
     assert finite["stock_remaining"] == 10 and not finite["infinite_supply"]
     assert infinite["infinite_supply"] and infinite["stock_remaining"] is None and infinite["supply_total"] is None
     assert finite["pricing"]["strategy"] == "static"
+    assert finite["description"] == "An interactive button."
+    assert infinite["description"] is None
 
     # Drafts are invisible to participants.
     api.as_(PARTICIPANT)
@@ -133,6 +138,7 @@ def test_full_lifecycle(api: Api, widgets: list[Widget], clock) -> None:
     shown = {item["widget_id"]: item for item in body["listings"]}
     assert shown[str(widgets[0].id)]["price"]["amount"] == 100
     assert shown[str(widgets[0].id)]["widget_name"] == "Button"
+    assert shown[str(widgets[0].id)]["description"] == "An interactive button."
     assert shown[str(widgets[1].id)]["price"]["valid_until"] is None
     assert "pricing" not in shown[str(widgets[0].id)]  # admin-only config
     price = api.get(f"/market/listings/{finite['id']}/price").json()

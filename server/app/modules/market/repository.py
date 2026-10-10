@@ -2,7 +2,7 @@ from uuid import UUID
 
 from sqlmodel import Session, col, select
 
-from app.contracts.catalog import CatalogGateway
+from app.contracts.catalog import CatalogGateway, WidgetInfo
 from app.core.services import gateway
 from app.modules.market.models import LIVE_STATUSES, Market, MarketListing, MarketRound, RoundStatus
 
@@ -76,5 +76,5 @@ def archived_widget_ids(session: Session, round_id: UUID) -> list[str]:
     return [w.id for w in sorted(archived, key=lambda w: (w.display_name, w.id))]
 
 
-def widget_names(session: Session, widget_ids: list[str]) -> dict[str, str]:
-    return {w.id: w.display_name for w in gateway(CatalogGateway, session).get_widgets(widget_ids).values()}
+def widget_details(session: Session, widget_ids: list[str]) -> dict[str, WidgetInfo]:
+    return gateway(CatalogGateway, session).get_widgets(widget_ids)

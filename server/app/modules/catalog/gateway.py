@@ -16,7 +16,9 @@ _PORT_ERRORS = {"WIDGET_NOT_FOUND": InvalidListing, "WIDGET_ARCHIVED": InvalidLi
 
 
 def _info(w: Widget) -> WidgetInfo:
-    return WidgetInfo(id=w.id, appdev_key=w.appdev_key, display_name=w.display_name, archived=w.archived)
+    return WidgetInfo(
+        id=w.id, appdev_key=w.appdev_key, display_name=w.display_name, archived=w.archived, description=w.description
+    )
 
 
 class CatalogGatewayImpl:

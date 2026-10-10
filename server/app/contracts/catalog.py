@@ -10,6 +10,7 @@ class WidgetInfo:
     appdev_key: str
     display_name: str
     archived: bool
+    description: str | None = None
 
 
 class CatalogGateway(Protocol):

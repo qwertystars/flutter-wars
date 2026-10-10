@@ -109,6 +109,7 @@ class ListingOut(BaseModel):
     round_id: UUID
     widget_id: str
     widget_name: str | None
+    description: str | None
     base_price: int
     infinite_supply: bool
     supply_total: int | None

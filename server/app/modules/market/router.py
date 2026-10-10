@@ -50,7 +50,7 @@ def _round_out(rnd: MarketRound) -> RoundOut:
 
 def _listings_out(session: Session, rnd: MarketRound, now: datetime, *, admin_view: bool) -> list[ListingOut]:
     listings = service.listings_for_round(session, rnd.id)
-    names = repo.widget_names(session, [listing.widget_id for listing in listings])
+    widgets = repo.widget_details(session, [listing.widget_id for listing in listings])
     prices = gateway(PricingGateway, session)
     # Each quote carries the stock it was computed from, so price and stock agree.
     quotes = prices.quote_many(rnd.id, now)
@@ -63,7 +63,8 @@ def _listings_out(session: Session, rnd: MarketRound, now: datetime, *, admin_vi
             id=listing.id,
             round_id=listing.round_id,
             widget_id=listing.widget_id,
-            widget_name=names.get(listing.widget_id),
+            widget_name=widgets[listing.widget_id].display_name if listing.widget_id in widgets else None,
+            description=widgets[listing.widget_id].description if listing.widget_id in widgets else None,
             base_price=listing.base_price,
             infinite_supply=listing.infinite_supply,
             supply_total=listing.supply_total,

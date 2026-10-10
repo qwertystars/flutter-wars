@@ -12,6 +12,7 @@ class InventoryItem:
     display_name: str
     quantity: int
     archived: bool
+    description: str | None = None
 
 
 class InventoryGateway(Protocol):

@@ -79,6 +79,7 @@ def get_team_inventory(s: Session, team_id: UUID, *, include_zero: bool = False)
             widget_id=r.widget_id,
             appdev_key=widgets[r.widget_id].appdev_key,
             display_name=widgets[r.widget_id].display_name,
+            description=widgets[r.widget_id].description,
             quantity=r.quantity,
             archived=widgets[r.widget_id].archived,
         )

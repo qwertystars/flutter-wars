@@ -16,6 +16,7 @@ class InventoryItemOut(BaseModel):
     widget_id: str
     appdev_key: str
     display_name: str
+    description: str | None
     quantity: int
     archived: bool
 

@@ -131,3 +131,23 @@ def test_unknown_widget_admin_routes(client, login_organizer):
     assert client.get("/admin/widgets/nope_nope").status_code == 404
     r = client.patch("/admin/widgets/nope_nope", json={"display_name": "x", "expected_version": 1})
     assert r.status_code == 404
+
+
+def test_description_create_update_and_clear(client, login_organizer):
+    login_organizer()
+    body = _body(description="Places children in a horizontal row.")
+    created = client.post("/admin/widgets", json=body)
+    assert created.status_code == 201
+    assert created.json()["description"] == body["description"]
+    url = f"/admin/widgets/{body['id']}"
+    assert client.get(f"/widgets/{body['id']}").json()["description"] == body["description"]
+    updated = client.patch(url, json={"description": "Updated explanation.", "expected_version": 1})
+    assert updated.status_code == 200
+    assert updated.json()["description"] == "Updated explanation."
+    items = client.get("/widgets").json()
+    assert next(w for w in items if w["id"] == body["id"])["description"] == "Updated explanation."
+    unchanged = client.patch(url, json={"category": "layout", "expected_version": 2})
+    assert unchanged.json()["description"] == "Updated explanation."
+    cleared = client.patch(url, json={"description": None, "expected_version": 3})
+    assert cleared.status_code == 200 and cleared.json()["description"] is None
+    assert client.post("/admin/widgets", json=_body(description="x" * 501)).status_code == 422
