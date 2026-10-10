@@ -1,6 +1,9 @@
 # Deployment (Module M)
 
-> The Worker builds the whole app (Modules A-K) on its first request. Its settings and
+> The Worker preloads application imports at deployment for Cloudflare's Python
+> memory snapshot. Binding-dependent app construction runs once per isolate on its
+> first request; Hyperdrive connection properties cannot be read in global scope.
+> Its settings and
 > secrets are listed in [environment-reference.md](environment-reference.md#application-settings-module-a);
 > set `JWT_SECRET_KEY` and `GOOGLE_OAUTH_CLIENT_SECRET` with `wrangler secret put` before
 > the first deploy, and register `<worker-url>/auth/google/callback` as an authorized
@@ -9,6 +12,13 @@
 Backend: Cloudflare Python Worker → FastAPI → sync SQLModel/SQLAlchemy → pg8000
 → Hyperdrive → Neon PostgreSQL. Migrations run outside the Worker, directly
 against Neon (control-plane operation), never through Hyperdrive.
+
+`app.factory` can be imported without reading settings or configuring the database;
+`app.main` remains the conventional ASGI entrypoint. Keep heavy application imports
+at Worker module scope so fresh isolates reuse the deployment snapshot. The Worker
+also collects unreachable import-time objects before snapshotting, avoiding deferred
+file-resource finalizers against the restored runtime's filesystem. Do not suppress
+`ZipFile` exceptions globally. OpenAPI is generated and cached when the app is built.
 
 ## Worker bundle / plan capacity
 

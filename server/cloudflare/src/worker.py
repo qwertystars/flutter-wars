@@ -1,11 +1,11 @@
 """Cloudflare Python Worker entry: serves app.main through the Workers ASGI adapter.
 
-A Worker receives its configuration (vars, secrets, the Hyperdrive binding) with each
-request, not in os.environ. So the app is built on the first request: the Hyperdrive
-engine is configured first (Module A then reuses it), Module A's Settings are read
-from the bindings, and Module B's Google calls switch to the Workers fetch API.
+Import application dependencies before the deployment snapshot is taken. Hyperdrive
+connection properties require a request context, so only binding-dependent setup
+is deferred to the first request; expensive imports run at deployment time.
 """
 
+import gc
 import logging
 import os
 from urllib.parse import urlparse
@@ -15,6 +15,13 @@ from pyodide.http import pyfetch
 from round_stream import RoundStream
 from sqlalchemy.pool import NullPool
 from workers import Response, WorkerEntrypoint, asgi
+
+from app.factory import create_app
+
+# Finalize unreachable import-time objects before the runtime snapshots Python
+# memory. In particular, file-backed import resources must not be finalized later
+# against file descriptors from the pre-snapshot filesystem.
+gc.collect()
 
 __all__ = ["Default", "RoundStream"]
 
@@ -36,7 +43,6 @@ SETTINGS = (
     "RESALE_EVENT_PROFIT_BPS",
     "RESALE_MAX_LOSS_BPS",
 )
-_app = None
 
 
 async def _get_json(url):
@@ -97,9 +103,12 @@ def _build(env):
     from app.modules.authentication import http
 
     http.install(get=_get_json, post=_post_form)
-    from app.main import app  # builds the app from the Settings above
-
+    app = create_app()
+    app.openapi()
     return app
+
+
+_app = None
 
 
 def get_app(env):
