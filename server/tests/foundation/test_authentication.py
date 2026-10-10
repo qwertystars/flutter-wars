@@ -1,3 +1,4 @@
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from sqlmodel import Session, SQLModel
@@ -94,12 +95,14 @@ def test_server_side_oauth_callback_exchanges_code_and_issues_jwt(app, client):
     )
     state = "test-oauth-state"
     client.cookies.set("google_oauth_state", state)
-    callback = client.get(f"/auth/google/callback?code=auth-code&state={state}")
-    assert callback.status_code == 200
-    assert callback.json()["token_type"] == "bearer"
+    callback = client.get(f"/auth/google/callback?code=auth-code&state={state}", follow_redirects=False)
+    assert callback.status_code == 302
+    redirect = urlsplit(callback.headers["location"])
+    assert (redirect.scheme, redirect.netloc) == ("flutterwars", "auth-callback")
+    token = parse_qs(redirect.query)["access_token"][0]
 
     me = client.get(
-        "/auth/me", headers={"Authorization": f"Bearer {callback.json()['access_token']}"}
+        "/auth/me", headers={"Authorization": f"Bearer {token}"}
     )
     assert me.status_code == 200
     assert me.json()["user_id"] == str(user_id)

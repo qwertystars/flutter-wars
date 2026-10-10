@@ -3,6 +3,7 @@
 import inspect
 from secrets import token_urlsafe
 from typing import Annotated, Any, Callable
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import RedirectResponse
@@ -75,13 +76,13 @@ def google_login_redirect(request: Request) -> RedirectResponse:
     return response
 
 
-@router.get("/google/callback", response_model=TokenResponse)
+@router.get("/google/callback", response_class=RedirectResponse, status_code=302)
 async def google_login_callback(
     request: Request,
     code: Annotated[str, Query(min_length=1)],
     state: Annotated[str, Query(min_length=1)],
     session: Annotated[Session, Depends(get_db)],
-) -> TokenResponse:
+) -> RedirectResponse:
     expected_state = request.cookies.get(_OAUTH_STATE_COOKIE)
     if not expected_state or expected_state != state:
         raise AppError("OAUTH_STATE_INVALID", "OAuth sign-in could not be validated.", 400)
@@ -94,7 +95,14 @@ async def google_login_callback(
     google_identity = await _resolved(_google_verifier(request)(id_token))
     if google_identity is None:
         raise AppError("INVALID_GOOGLE_CREDENTIAL", "Google credential is invalid.", 401)
-    return _issue_token(request, session, google_identity)
+    token = _issue_token(request, session, google_identity)
+    response = RedirectResponse(
+        "flutterwars://auth-callback?" + urlencode({"access_token": token.access_token}),
+        status_code=302,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+    response.delete_cookie(_OAUTH_STATE_COOKIE)
+    return response
 
 
 @router.post("/google", response_model=TokenResponse)
